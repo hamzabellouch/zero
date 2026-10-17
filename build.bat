@@ -58,13 +58,13 @@ if errorlevel 1 (
 cd ..
 
 echo [3/3] Compiling and Linking C++ Sources (Optimized /MT Standalone)...
-cl.exe /nologo /O2 /W3 /MT /std:c++17 /EHsc /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN ^
+cl.exe /nologo /O2 /W3 /MT /std:c++17 /EHsc /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /GS /guard:cf /Gy ^
     /Fo"build\\" ^
     /Fe"bin\Zero.exe" ^
     src\main.cpp src\app_manager.cpp src\cleaner.cpp src\ui_leftovers_dlg.cpp src\ui_scan_dlg.cpp src\process_manager.cpp ^
     build\app.res ^
     /link /SUBSYSTEM:WINDOWS /MACHINE:X64 ^
-    /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /OPT:REF /OPT:ICF ^
+    /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /OPT:REF /OPT:ICF /GUARD:CF ^
     user32.lib gdi32.lib gdiplus.lib comctl32.lib comdlg32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib dwmapi.lib uxtheme.lib psapi.lib version.lib iphlpapi.lib
 
 if errorlevel 1 (
