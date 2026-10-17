@@ -11,6 +11,7 @@ set(CORE_SOURCES
     src/platform/platform_defs.h
     src/platform/app_scanner.h
     src/platform/process_engine.h
+    src/platform/process_engine.cpp
     src/platform/leftover_cleaner.h
 )
 
@@ -89,12 +90,22 @@ if(Qt6_FOUND OR Qt5_FOUND)
         if(APPLE)
             target_link_libraries(Zero-CrossPlatform PRIVATE ${LIB_LIBPROC} ${FW_COCOA} ${FW_IOKIT})
             set_target_properties(Zero-CrossPlatform PROPERTIES
+                OUTPUT_NAME "Zero"
                 MACOSX_BUNDLE TRUE
                 MACOSX_BUNDLE_BUNDLE_NAME "Zero"
                 MACOSX_BUNDLE_BUNDLE_IDENTIFIER "com.zero.uninstaller"
                 MACOSX_BUNDLE_SHORT_VERSION_STRING "0.0.1"
             )
+        elseif(UNIX)
+            set_target_properties(Zero-CrossPlatform PROPERTIES
+                OUTPUT_NAME "Zero"
+            )
         endif()
+
+        install(TARGETS Zero-CrossPlatform
+            BUNDLE DESTINATION .
+            RUNTIME DESTINATION bin
+        )
     endif()
 endif()
 

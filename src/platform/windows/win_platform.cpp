@@ -134,19 +134,6 @@ namespace ZeroCore {
         ProcessManager m_mgr;
     };
 
-    std::wstring IProcessEngine::FormatPercent(double val) {
-        return ProcessManager::FormatPercent(val);
-    }
-    std::wstring IProcessEngine::FormatMemory(uint64_t bytes) {
-        return ProcessManager::FormatMemory(bytes);
-    }
-    std::wstring IProcessEngine::FormatDiskRate(double bytesPerSec) {
-        return ProcessManager::FormatDiskRate(bytesPerSec);
-    }
-    std::wstring IProcessEngine::FormatNetworkRate(double bytesPerSec) {
-        return ProcessManager::FormatNetworkRate(bytesPerSec);
-    }
-
     class WinLeftoverCleaner : public ILeftoverCleaner {
     public:
         std::vector<LeftoverItem> ScanLeftovers(const AppInfo& app) override {

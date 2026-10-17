@@ -75,13 +75,15 @@ jobs:
         run: |
           cmake --build build --config Release
 
-      - name: Package macOS DMG
+      - name: Package macOS
         run: |
           cd build
-          cpack -G DragNDrop
+          cpack -G DragNDrop || cpack -G TGZ
 
-      - name: Upload macOS DMG
+      - name: Upload macOS Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Zero-macOS-Portable
-          path: build/*.dmg
+          path: |
+            build/*.dmg
+            build/*.tar.gz
