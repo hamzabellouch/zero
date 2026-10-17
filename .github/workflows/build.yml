@@ -1,0 +1,87 @@
+name: Build Zero Cross-Platform
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Windows Standalone Portable (Win32)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build Standalone Zero.exe
+        run: |
+          .\build.bat
+
+      - name: Upload Windows Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Windows-Portable
+          path: bin/Zero.exe
+
+  build-linux:
+    name: Linux Portable (AppImage / TGZ)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential qt6-base-dev qt6-base-dev-tools
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Linux Target
+        run: |
+          cmake --build build --config Release
+
+      - name: Package Linux
+        run: |
+          cd build
+          cpack -G TGZ
+
+      - name: Upload Linux Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-Linux-Portable
+          path: build/*.tar.gz
+
+  build-macos:
+    name: macOS Portable (DMG / App)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          brew install cmake qt@6
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
+
+      - name: Build macOS Target
+        run: |
+          cmake --build build --config Release
+
+      - name: Package macOS DMG
+        run: |
+          cd build
+          cpack -G DragNDrop
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zero-macOS-Portable
+          path: build/*.dmg

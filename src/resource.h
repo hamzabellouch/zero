@@ -1,0 +1,50 @@
+#pragma once
+
+#define IDI_APP_ICON            101
+#define IDD_LEFTOVERS_DLG       102
+
+// Main Window Controls
+#define IDC_SEARCH_EDIT         1001
+#define IDC_SEARCH_LABEL        1002
+#define IDC_BTN_REFRESH         1003
+#define IDC_BTN_UNINSTALL       1004
+#define IDC_BTN_DEEP_CLEAN      1005
+#define IDC_BTN_FORCE_REMOVE    1006
+#define IDC_APP_LISTVIEW        1007
+#define IDC_STATUS_BAR          1008
+#define IDC_TOP_MENUBAR         1009
+
+// Leftovers Dialog Controls
+#define IDC_LEFTOVERS_LIST      2001
+#define IDC_BTN_SELECT_ALL      2002
+#define IDC_BTN_DESELECT_ALL    2003
+#define IDC_BTN_DELETE_SELECTED 2004
+#define IDC_BTN_CLOSE_DLG       2005
+#define IDC_STATIC_INFO         2006
+
+// Menu Commands
+#define IDM_FILE_EXPORT_HTML    3001
+#define IDM_FILE_EXPORT_CSV     3002
+#define IDM_FILE_EXIT           3003
+
+#define IDM_ACTION_UNINSTALL    3004
+#define IDM_ACTION_FORCE_REMOVAL 3005
+#define IDM_ACTION_REMOVE_ENTRY 3006
+#define IDM_ACTION_OPEN_FOLDER  3007
+#define IDM_ACTION_OPEN_REGISTRY 3008
+#define IDM_ACTION_SEARCH_GOOGLE 3009
+
+#define IDM_VIEW_DESKTOP_APPS   3010
+#define IDM_VIEW_STORE_APPS     3011
+#define IDM_VIEW_REFRESH        3012
+#define IDM_VIEW_PROCESSES      3014
+
+#define IDM_PROCESS_END_TASK    3015
+#define IDM_PROCESS_OPEN_FOLDER 3016
+#define IDM_PROCESS_PROPERTIES  3017
+#define IDM_PROCESS_SEARCH_ONLINE 3018
+
+#define IDM_HELP_ABOUT          3013
+
+// Timer IDs
+#define IDT_PROCESS_REFRESH_TIMER 4001

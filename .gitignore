@@ -1,0 +1,24 @@
+# Build directories
+build/
+bin/
+out/
+
+# Intermediate compiler files
+*.obj
+*.res
+*.o
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+*.exp
+
+# IDE and OS artifacts
+.vs/
+.vscode/
+*.user
+Thumbs.db
+.DS_Store
