@@ -5,19 +5,44 @@ echo ===================================================
 echo   Building Zero (Portable Standalone)
 echo ===================================================
 
-set "VS_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+:: Check if cl.exe is already in PATH (e.g. GitHub Actions or Developer Command Prompt)
+where cl.exe >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [1/3] MSVC environment already configured in PATH.
+    goto :compile_prep
+)
 
-if not exist "!VS_VCVARS!" (
-    echo [ERROR] Could not find vcvars64.bat at "!VS_VCVARS!"
+:: Otherwise, locate vcvars64.bat dynamically using vswhere or standard locations
+set "VS_VCVARS="
+if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
+    for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+        if exist "%%i\VC\Auxiliary\Build\vcvars64.bat" (
+            set "VS_VCVARS=%%i\VC\Auxiliary\Build\vcvars64.bat"
+        )
+    )
+)
+
+if "!VS_VCVARS!"=="" (
+    for %%e in (Community Professional Enterprise BuildTools) do (
+        if exist "C:\Program Files\Microsoft Visual Studio\2022\%%e\VC\Auxiliary\Build\vcvars64.bat" (
+            set "VS_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\%%e\VC\Auxiliary\Build\vcvars64.bat"
+        )
+    )
+)
+
+if "!VS_VCVARS!"=="" (
+    echo [ERROR] Could not find vcvars64.bat. Please run from Developer Command Prompt for VS.
     exit /b 1
 )
 
-echo [1/3] Initializing Visual Studio 2022 Build Environment (x64)...
+echo [1/3] Initializing Visual Studio Build Environment (x64)...
 call "!VS_VCVARS!" >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Failed to initialize MSVC environment.
     exit /b 1
 )
+
+:compile_prep
 
 if not exist "bin" mkdir "bin"
 if not exist "build" mkdir "build"
