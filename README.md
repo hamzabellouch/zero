@@ -6,8 +6,7 @@
 Cleanly uninstall desktop and store applications, eradicate leftover files and registry keys, and monitor system processes in real time with zero installation, zero bloat, and complete privacy.
 </p>
 
-<img width="2724" height="1536" alt="Zero" src="https://github.com/user-attachments/assets/c741fb2b-e1e1-445c-b417-f5b9c1d63f5e" />
-
+<img width="2752" height="1536" alt="Zero" src="https://github.com/user-attachments/assets/354675a4-b343-43b0-a651-5031dd3def12" />
 
 
 ## Overview
