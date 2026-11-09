@@ -1,5 +1,9 @@
 #include "updater.h"
 #include "resource.h"
+#include <windows.h>
+#include <unknwn.h>
+#include <objidl.h>
+#include <objbase.h>
 #include <shellapi.h>
 #include <wininet.h>
 #include <dwmapi.h>
@@ -799,13 +803,13 @@ namespace {
 
             // Buttons
             ctx->hBtnPrimary = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-                                               0, 0, 0, 0, hWnd, (HMENU)IDC_BTN_ACTION_PRIMARY, GetModuleHandle(nullptr), nullptr);
+                                               0, 0, 0, 0, hWnd, (HMENU)(INT_PTR)IDC_BTN_ACTION_PRIMARY, GetModuleHandle(nullptr), nullptr);
 
             ctx->hBtnSecondary = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-                                                 0, 0, 0, 0, hWnd, (HMENU)IDC_BTN_ACTION_SECONDARY, GetModuleHandle(nullptr), nullptr);
+                                                 0, 0, 0, 0, hWnd, (HMENU)(INT_PTR)IDC_BTN_ACTION_SECONDARY, GetModuleHandle(nullptr), nullptr);
 
             ctx->hBtnCancel = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-                                              0, 0, 0, 0, hWnd, (HMENU)IDC_BTN_ACTION_CANCEL, GetModuleHandle(nullptr), nullptr);
+                                              0, 0, 0, 0, hWnd, (HMENU)(INT_PTR)IDC_BTN_ACTION_CANCEL, GetModuleHandle(nullptr), nullptr);
 
             LayoutControls(ctx);
 

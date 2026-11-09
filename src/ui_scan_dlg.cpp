@@ -1,5 +1,8 @@
 #include "ui_scan_dlg.h"
 #include "resource.h"
+#include <unknwn.h>
+#include <objidl.h>
+#include <objbase.h>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <gdiplus.h>
