@@ -8,6 +8,7 @@
 #include <uxtheme.h>
 #include <vector>
 #include <string>
+#include <memory>
 #include <algorithm>
 #include <iomanip>
 #include <sstream>
@@ -19,6 +20,7 @@
 #include "ui_leftovers_dlg.h"
 #include "ui_scan_dlg.h"
 #include "process_manager.h"
+#include "updater.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "comdlg32.lib")
@@ -31,6 +33,7 @@
 #pragma comment(lib, "psapi.lib")
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "wininet.lib")
 
 namespace {
     enum class AppViewMode {
@@ -40,18 +43,28 @@ namespace {
     };
     AppViewMode g_currentViewMode = AppViewMode::Desktop;
 
-    // Colors matching Geek Uninstaller dark theme exactly
-    const COLORREF CLR_BG_EVEN        = RGB(25, 25, 25);     // #191919
-    const COLORREF CLR_BG_ODD         = RGB(33, 33, 33);     // #212121
-    const COLORREF CLR_BG_SELECTED    = RGB(224, 86, 46);    // #E0562E Vivid Coral/Orange
-    const COLORREF CLR_TEXT_NORMAL    = RGB(224, 224, 224);  // Light Gray
-    const COLORREF CLR_TEXT_SELECTED  = RGB(255, 255, 255);  // Pure White
-    const COLORREF CLR_TEXT_MUTED     = RGB(140, 140, 140);  // Dimmed Gray for secondary info
-    const COLORREF CLR_HEADER_BG      = RGB(26, 26, 26);     // #1A1A1A (Exact match with CLR_BOTTOM_BG)
-    const COLORREF CLR_HEADER_TEXT    = RGB(200, 200, 200);  // #C8C8C8
-    const COLORREF CLR_BOTTOM_BG      = RGB(26, 26, 26);     // #1A1A1A
-    const COLORREF CLR_BOTTOM_BORDER  = RGB(45, 45, 45);     // #2D2D2D
-    const COLORREF CLR_EDIT_BG        = RGB(38, 38, 38);     // #262626
+    enum class RowSizeMode {
+        Compact = 0,
+        Normal  = 1,
+        Large   = 2
+    };
+
+    bool g_isDarkMode = true;
+    RowSizeMode g_rowSizeMode = RowSizeMode::Compact;
+
+    // Theme colors (dynamically switched between Dark and Light mode)
+    // Dark mode: Deep Midnight Navy palette matching Title Bar #1A212D (RGB 26, 33, 45)
+    COLORREF CLR_BG_EVEN        = RGB(20, 26, 36);     // #141A24 Deep Midnight Navy
+    COLORREF CLR_BG_ODD         = RGB(28, 36, 51);     // #1C2433 Lighter Midnight Navy
+    COLORREF CLR_BG_SELECTED    = RGB(0, 120, 215);    // #0078D7 Windows Accent Blue
+    COLORREF CLR_TEXT_NORMAL    = RGB(226, 232, 240);  // #E2E8F0 Clean Silver White
+    COLORREF CLR_TEXT_SELECTED  = RGB(255, 255, 255);  // Pure White
+    COLORREF CLR_TEXT_MUTED     = RGB(141, 155, 176);  // #8D9BB0 Slate
+    COLORREF CLR_HEADER_BG      = RGB(26, 33, 45);     // #1A212D Exact Title Bar Match
+    COLORREF CLR_HEADER_TEXT    = RGB(203, 213, 225);  // #CBD5E1 Cool Header Text
+    COLORREF CLR_BOTTOM_BG      = RGB(26, 33, 45);     // #1A212D Exact Title Bar Match
+    COLORREF CLR_BOTTOM_BORDER  = RGB(40, 53, 72);     // #283548 Soft Midnight Border
+    COLORREF CLR_EDIT_BG        = RGB(34, 44, 61);     // #222C3D Search Capsule Inside
 
     HINSTANCE g_hInstance = nullptr;
     HWND g_hWndMain = nullptr;
@@ -66,11 +79,11 @@ namespace {
     bool g_searchClearHovered = false;
     bool g_bottomBarTrackingMouse = false;
 
-    constexpr int TOP_MENU_COUNT = 5;
+    constexpr int TOP_MENU_COUNT = 6;
     int g_topMenuHoverIndex = -1;
     int g_topMenuOpenIndex = -1;
     bool g_topMenuTrackingMouse = false;
-    const wchar_t* g_topMenuNames[TOP_MENU_COUNT] = { L"File", L"Action", L"Processes", L"View", L"Help" };
+    const wchar_t* g_topMenuNames[TOP_MENU_COUNT] = { L"File", L"Action", L"Processes", L"View", L"Settings", L"Help" };
 
     HFONT g_hFont = nullptr;
     HFONT g_hFontBold = nullptr;
@@ -84,6 +97,15 @@ namespace {
     std::vector<InstalledApp> g_allApps;
     std::vector<InstalledApp> g_displayedApps;
     uint64_t g_totalSizeBytes = 0;
+
+    enum class AppSortColumn {
+        Name = 0,
+        Size = 1,
+        Date = 2
+    };
+
+    AppSortColumn g_appSortColumn = AppSortColumn::Name;
+    bool g_appSortAscending = true;
 
     ProcessManager g_processManager;
     std::vector<ProcessItem> g_allProcesses;
@@ -113,6 +135,24 @@ namespace {
         return (val * (float)dpi) / 96.0f;
     }
 
+    int GetCurrentRowHeight(UINT dpi) {
+        switch (g_rowSizeMode) {
+        case RowSizeMode::Compact: return ScaleDpi(25, dpi);
+        case RowSizeMode::Large:   return ScaleDpi(44, dpi);
+        case RowSizeMode::Normal:
+        default:                   return ScaleDpi(32, dpi);
+        }
+    }
+
+    int GetCurrentIconSize(UINT dpi) {
+        switch (g_rowSizeMode) {
+        case RowSizeMode::Compact: return ScaleDpi(16, dpi);
+        case RowSizeMode::Large:   return ScaleDpi(24, dpi);
+        case RowSizeMode::Normal:
+        default:                   return ScaleDpi(18, dpi);
+        }
+    }
+
     void RecreateFonts(HWND hWnd) {
         UINT dpi = GetWindowDpi(hWnd);
 
@@ -121,8 +161,11 @@ namespace {
         if (g_hFontHeader) DeleteObject(g_hFontHeader);
         if (g_hFontStatus) DeleteObject(g_hFontStatus);
 
-        // Font sizes scaled 10% smaller for compact, sleek appearance matching Geek Uninstaller
-        int fontSize = MulDiv(-15, dpi, 96);
+        int fontBase = -15;
+        if (g_rowSizeMode == RowSizeMode::Compact) fontBase = -13;
+        else if (g_rowSizeMode == RowSizeMode::Large) fontBase = -17;
+
+        int fontSize = MulDiv(fontBase, dpi, 96);
         int headerSize = MulDiv(-14, dpi, 96);
         int statusSize = MulDiv(-13, dpi, 96);
 
@@ -258,6 +301,36 @@ namespace {
                     return g_processSortAscending ? (a.netBytesPerSec < b.netBytesPerSec) : (a.netBytesPerSec > b.netBytesPerSec);
                 }
                 return a.memoryBytes > b.memoryBytes;
+            }
+            return false;
+        });
+    }
+
+    void SortApplications() {
+        std::sort(g_displayedApps.begin(), g_displayedApps.end(), [](const InstalledApp& a, const InstalledApp& b) {
+            if (g_appSortColumn == AppSortColumn::Name) {
+                int cmp = _wcsicmp(a.displayName.c_str(), b.displayName.c_str());
+                return g_appSortAscending ? (cmp < 0) : (cmp > 0);
+            }
+            if (g_appSortColumn == AppSortColumn::Size) {
+                if (a.estimatedSizeBytes != b.estimatedSizeBytes) {
+                    if (a.estimatedSizeBytes == 0) return false;
+                    if (b.estimatedSizeBytes == 0) return true;
+                    return g_appSortAscending ? (a.estimatedSizeBytes < b.estimatedSizeBytes)
+                                              : (a.estimatedSizeBytes > b.estimatedSizeBytes);
+                }
+                int cmp = _wcsicmp(a.displayName.c_str(), b.displayName.c_str());
+                return cmp < 0;
+            }
+            if (g_appSortColumn == AppSortColumn::Date) {
+                if (a.installDateSortKey != b.installDateSortKey) {
+                    if (a.installDateSortKey == 0) return false;
+                    if (b.installDateSortKey == 0) return true;
+                    return g_appSortAscending ? (a.installDateSortKey < b.installDateSortKey)
+                                              : (a.installDateSortKey > b.installDateSortKey);
+                }
+                int cmp = _wcsicmp(a.displayName.c_str(), b.displayName.c_str());
+                return cmp < 0;
             }
             return false;
         });
@@ -413,6 +486,7 @@ namespace {
                 }
             }
         }
+        SortApplications();
         PopulateMainListView();
     }
 
@@ -420,8 +494,8 @@ namespace {
         HCURSOR hOldCursor = SetCursor(LoadCursor(nullptr, IDC_WAIT));
         
         UINT dpi = GetWindowDpi(g_hWndMain);
-        int iconSize = ScaleDpi(18, dpi);    // Crisp high-resolution icon (10% smaller)
-        int rowHeight = ScaleDpi(32, dpi);   // 10% smaller row height (sleek & compact)
+        int iconSize = GetCurrentIconSize(dpi);
+        int rowHeight = GetCurrentRowHeight(dpi);
 
         // Free previous icons to prevent GDI handle leak
         for (auto& app : g_allApps) {
@@ -459,6 +533,132 @@ namespace {
 
         SetCursor(hOldCursor);
         FilterApplications();
+    }
+
+    void SaveSettings() {
+        HKEY hKey;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Zero", 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS) {
+            DWORD valDark = g_isDarkMode ? 1 : 0;
+            RegSetValueExW(hKey, L"DarkMode", 0, REG_DWORD, (const BYTE*)&valDark, sizeof(valDark));
+            DWORD valSize = static_cast<DWORD>(g_rowSizeMode);
+            RegSetValueExW(hKey, L"RowSizeMode", 0, REG_DWORD, (const BYTE*)&valSize, sizeof(valSize));
+            RegCloseKey(hKey);
+        }
+    }
+
+    void LoadSettings() {
+        g_rowSizeMode = RowSizeMode::Compact;
+        HKEY hKey;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Zero", 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+            DWORD val = 0;
+            DWORD sz = sizeof(val);
+            if (RegQueryValueExW(hKey, L"DarkMode", nullptr, nullptr, (LPBYTE)&val, &sz) == ERROR_SUCCESS) {
+                g_isDarkMode = (val != 0);
+            }
+            sz = sizeof(val);
+            if (RegQueryValueExW(hKey, L"RowSizeMode", nullptr, nullptr, (LPBYTE)&val, &sz) == ERROR_SUCCESS) {
+                if (val <= 2) g_rowSizeMode = static_cast<RowSizeMode>(val);
+            }
+            RegCloseKey(hKey);
+        }
+    }
+
+    void UpdateTheme(bool darkMode) {
+        g_isDarkMode = darkMode;
+        if (g_isDarkMode) {
+            CLR_BG_EVEN        = RGB(20, 26, 36);     // #141A24 Deep Midnight Navy
+            CLR_BG_ODD         = RGB(28, 36, 51);     // #1C2433 Lighter Midnight Navy
+            CLR_BG_SELECTED    = RGB(0, 120, 215);    // #0078D7 Windows Accent Blue
+            CLR_TEXT_NORMAL    = RGB(226, 232, 240);  // #E2E8F0 Clean Silver White
+            CLR_TEXT_SELECTED  = RGB(255, 255, 255);  // Pure White
+            CLR_TEXT_MUTED     = RGB(141, 155, 176);  // #8D9BB0 Slate
+            CLR_HEADER_BG      = RGB(26, 33, 45);     // #1A212D Exact Title Bar Match
+            CLR_HEADER_TEXT    = RGB(203, 213, 225);  // #CBD5E1 Cool Header Text
+            CLR_BOTTOM_BG      = RGB(26, 33, 45);     // #1A212D Exact Title Bar Match
+            CLR_BOTTOM_BORDER  = RGB(40, 53, 72);     // #283548 Soft Midnight Border
+            CLR_EDIT_BG        = RGB(34, 44, 61);     // #222C3D Search Capsule Inside
+        } else {
+            CLR_BG_EVEN        = RGB(255, 255, 255);
+            CLR_BG_ODD         = RGB(246, 248, 250);
+            CLR_BG_SELECTED    = RGB(0, 120, 215);
+            CLR_TEXT_NORMAL    = RGB(32, 32, 32);
+            CLR_TEXT_SELECTED  = RGB(255, 255, 255);
+            CLR_TEXT_MUTED     = RGB(115, 115, 115);
+            CLR_HEADER_BG      = RGB(242, 244, 247);
+            CLR_HEADER_TEXT    = RGB(60, 60, 60);
+            CLR_BOTTOM_BG      = RGB(242, 244, 247);
+            CLR_BOTTOM_BORDER  = RGB(218, 221, 226);
+            CLR_EDIT_BG        = RGB(255, 255, 255);
+        }
+
+        SaveSettings();
+
+        if (g_hBrushBottom) DeleteObject(g_hBrushBottom);
+        if (g_hBrushEdit) DeleteObject(g_hBrushEdit);
+        g_hBrushBottom = CreateSolidBrush(CLR_BOTTOM_BG);
+        g_hBrushEdit = CreateSolidBrush(CLR_EDIT_BG);
+
+        if (g_hWndMain) {
+            BOOL dwmDark = g_isDarkMode ? TRUE : FALSE;
+            DwmSetWindowAttribute(g_hWndMain, 20, &dwmDark, sizeof(dwmDark));
+            DwmSetWindowAttribute(g_hWndMain, 19, &dwmDark, sizeof(dwmDark));
+
+            HBRUSH hBrWnd = CreateSolidBrush(CLR_BG_EVEN);
+            HBRUSH hOldBr = (HBRUSH)SetClassLongPtrW(g_hWndMain, GCLP_HBRBACKGROUND, (LONG_PTR)hBrWnd);
+            if (hOldBr) DeleteObject(hOldBr);
+        }
+
+        if (g_hListView) {
+            ListView_SetBkColor(g_hListView, CLR_BG_EVEN);
+            ListView_SetTextBkColor(g_hListView, CLR_BG_EVEN);
+            ListView_SetTextColor(g_hListView, CLR_TEXT_NORMAL);
+            SetWindowTheme(g_hListView, g_isDarkMode ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+            InvalidateRect(g_hListView, nullptr, TRUE);
+        }
+
+        if (g_hTopMenuBar) InvalidateRect(g_hTopMenuBar, nullptr, TRUE);
+        if (g_hHeader) InvalidateRect(g_hHeader, nullptr, TRUE);
+        if (g_hBottomBar) InvalidateRect(g_hBottomBar, nullptr, TRUE);
+        if (g_hEditSearch) InvalidateRect(g_hEditSearch, nullptr, TRUE);
+        if (g_hWndMain) InvalidateRect(g_hWndMain, nullptr, TRUE);
+    }
+
+    void ApplyRowSizeMode(RowSizeMode mode) {
+        g_rowSizeMode = mode;
+        SaveSettings();
+        RecreateFonts(g_hWndMain);
+
+        UINT dpi = GetWindowDpi(g_hWndMain);
+        int iconSize = GetCurrentIconSize(dpi);
+        int rowHeight = GetCurrentRowHeight(dpi);
+
+        if (g_hImageList) {
+            ImageList_Destroy(g_hImageList);
+        }
+        g_hImageList = ImageList_Create(iconSize, rowHeight, ILC_COLOR32 | ILC_MASK, 32, 32);
+
+        if (g_currentViewMode != AppViewMode::Processes) {
+            for (auto& app : g_allApps) {
+                if (app.hIcon) {
+                    DestroyIcon(app.hIcon);
+                    app.hIcon = nullptr;
+                }
+                app.hIcon = AppManager::ExtractAppIcon(app, iconSize);
+                if (app.hIcon) {
+                    app.iconIndex = ImageList_AddIcon(g_hImageList, app.hIcon);
+                } else {
+                    app.iconIndex = -1;
+                }
+            }
+            ListView_SetImageList(g_hListView, g_hImageList, LVSIL_SMALL);
+            FilterApplications();
+        } else {
+            ListView_SetImageList(g_hListView, g_hImageList, LVSIL_SMALL);
+            FilterProcesses();
+        }
+
+        InvalidateRect(g_hListView, nullptr, TRUE);
+        if (g_hHeader) InvalidateRect(g_hHeader, nullptr, TRUE);
     }
 
     void SetupListViewColumns(AppViewMode mode) {
@@ -515,7 +715,7 @@ namespace {
 
             col.fmt = LVCFMT_LEFT;
             col.cx = col0Width;
-            col.pszText = const_cast<LPWSTR>(L"Name");
+            col.pszText = const_cast<LPWSTR>(L"Program Name");
             ListView_InsertColumn(g_hListView, 0, &col);
 
             col.fmt = LVCFMT_RIGHT;
@@ -772,43 +972,178 @@ namespace {
         }
     }
 
+    struct CustomMenuItem {
+        UINT id = 0;
+        std::wstring text;
+        std::wstring shortcut;
+        bool isSeparator = false;
+        bool isChecked = false;
+        bool isRadio = false;
+        bool isDisabled = false;
+    };
+
+    std::vector<std::unique_ptr<CustomMenuItem>> g_menuItemsPool;
+
+    HMENU CreateCustomPopupMenu() {
+        HMENU hMenu = CreatePopupMenu();
+        if (hMenu) {
+            MENUINFO mi = { sizeof(mi) };
+            mi.cbSize = sizeof(mi);
+            mi.fMask = MIM_STYLE | MIM_BACKGROUND | MIM_APPLYTOSUBMENUS;
+            mi.dwStyle = MNS_NOCHECK;
+            mi.hbrBack = g_isDarkMode ? g_hBrushBottom : (HBRUSH)GetStockObject(WHITE_BRUSH);
+            SetMenuInfo(hMenu, &mi);
+        }
+        return hMenu;
+    }
+
+    void AddCustomMenuItem(HMENU hMenu, UINT id, const std::wstring& fullText, bool isChecked = false, bool isDisabled = false, bool isSeparator = false, bool isRadio = false) {
+        auto item = std::make_unique<CustomMenuItem>();
+        item->id = id;
+        item->isChecked = isChecked;
+        item->isDisabled = isDisabled;
+        item->isSeparator = isSeparator;
+        item->isRadio = isRadio;
+
+        if (isSeparator) {
+            item->text = L"";
+            item->shortcut = L"";
+        } else {
+            size_t tabPos = fullText.find(L'\t');
+            if (tabPos != std::wstring::npos) {
+                item->text = fullText.substr(0, tabPos);
+                item->shortcut = fullText.substr(tabPos + 1);
+            } else {
+                item->text = fullText;
+                item->shortcut = L"";
+            }
+        }
+
+        CustomMenuItem* pItem = item.get();
+        g_menuItemsPool.push_back(std::move(item));
+
+        UINT flags = MF_OWNERDRAW;
+        if (isSeparator) flags |= MF_SEPARATOR;
+        if (isChecked) flags |= MF_CHECKED;
+        if (isDisabled) flags |= MF_GRAYED | MF_DISABLED;
+
+        AppendMenuW(hMenu, flags, id, reinterpret_cast<LPCWSTR>(pItem));
+    }
+
+    void AddCustomSeparator(HMENU hMenu) {
+        AddCustomMenuItem(hMenu, 0, L"", false, false, true);
+    }
+
+    static HHOOK g_hMenuHook = nullptr;
+
+    static LRESULT CALLBACK MenuWndSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+        switch (uMsg) {
+        case WM_CREATE: {
+            BOOL darkMode = g_isDarkMode ? TRUE : FALSE;
+            DwmSetWindowAttribute(hWnd, 20, &darkMode, sizeof(darkMode));
+            DwmSetWindowAttribute(hWnd, 19, &darkMode, sizeof(darkMode));
+            break;
+        }
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            COLORREF bg = g_isDarkMode ? CLR_HEADER_BG : RGB(255, 255, 255);
+            HBRUSH hBr = CreateSolidBrush(bg);
+            FillRect(hdc, &rc, hBr);
+            DeleteObject(hBr);
+            return 1;
+        }
+        case WM_NCPAINT: {
+            LRESULT res = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            HDC hdc = GetWindowDC(hWnd);
+            if (hdc) {
+                RECT rcWindow;
+                GetWindowRect(hWnd, &rcWindow);
+                int w = rcWindow.right - rcWindow.left;
+                int h = rcWindow.bottom - rcWindow.top;
+                COLORREF borderCol = g_isDarkMode ? CLR_BOTTOM_BORDER : RGB(218, 221, 226);
+                HPEN hPen = CreatePen(PS_SOLID, 1, borderCol);
+                HBRUSH hNullBr = (HBRUSH)GetStockObject(NULL_BRUSH);
+                HPEN oldPen = (HPEN)SelectObject(hdc, hPen);
+                HBRUSH oldBr = (HBRUSH)SelectObject(hdc, hNullBr);
+                Rectangle(hdc, 0, 0, w, h);
+                SelectObject(hdc, oldBr);
+                SelectObject(hdc, oldPen);
+                DeleteObject(hPen);
+                ReleaseDC(hWnd, hdc);
+            }
+            return res;
+        }
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(hWnd, MenuWndSubclassProc, uIdSubclass);
+            break;
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    static LRESULT CALLBACK MenuCbtHook(int nCode, WPARAM wParam, LPARAM lParam) {
+        if (nCode == HCBT_CREATEWND) {
+            HWND hWnd = (HWND)wParam;
+            wchar_t className[32] = { 0 };
+            GetClassNameW(hWnd, className, 32);
+            if (wcscmp(className, L"#32768") == 0) {
+                SetWindowSubclass(hWnd, MenuWndSubclassProc, 101, 0);
+            }
+        }
+        return CallNextHookEx(g_hMenuHook, nCode, wParam, lParam);
+    }
+
+    void SetCustomMenuHook() {
+        if (!g_hMenuHook) {
+            g_hMenuHook = SetWindowsHookExW(WH_CBT, MenuCbtHook, nullptr, GetCurrentThreadId());
+        }
+    }
+
+    void ReleaseCustomMenuHook() {
+        if (g_hMenuHook) {
+            UnhookWindowsHookEx(g_hMenuHook);
+            g_hMenuHook = nullptr;
+        }
+    }
+
     void ShowContextMenu(HWND hWnd, int x, int y) {
+        g_menuItemsPool.clear();
+
         if (g_currentViewMode == AppViewMode::Processes) {
             const ProcessItem* pProc = GetSelectedProcess();
             if (!pProc) return;
 
-            HMENU hMenu = CreatePopupMenu();
-            InsertMenuW(hMenu, 0, MF_BYPOSITION | MF_STRING, IDM_PROCESS_END_TASK, L"&End Task\tDel");
-            InsertMenuW(hMenu, 1, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-            UINT pathFlag = pProc->fullPath.empty() ? (MF_BYPOSITION | MF_STRING | MF_GRAYED) : (MF_BYPOSITION | MF_STRING);
-            InsertMenuW(hMenu, 2, pathFlag, IDM_PROCESS_OPEN_FOLDER, L"&Open File Location");
-            InsertMenuW(hMenu, 3, pathFlag, IDM_PROCESS_PROPERTIES, L"&Properties");
-            InsertMenuW(hMenu, 4, MF_BYPOSITION | MF_STRING, IDM_PROCESS_SEARCH_ONLINE, L"&Search Online");
-            InsertMenuW(hMenu, 5, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-            InsertMenuW(hMenu, 6, MF_BYPOSITION | MF_STRING, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
+            HMENU hMenu = CreateCustomPopupMenu();
+            AddCustomMenuItem(hMenu, IDM_PROCESS_END_TASK, L"&End Task\tDel", false, false);
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_PROCESS_OPEN_FOLDER, L"&Open File Location", false, pProc->fullPath.empty());
+            AddCustomMenuItem(hMenu, IDM_PROCESS_PROPERTIES, L"&Properties", false, pProc->fullPath.empty());
+            AddCustomMenuItem(hMenu, IDM_PROCESS_SEARCH_ONLINE, L"&Search Online", false, false);
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R", false, false);
 
-            TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_TOPALIGN, x, y, 0, hWnd, nullptr);
+            TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_TOPALIGN, x, y, 0, g_hWndMain, nullptr);
             DestroyMenu(hMenu);
+            g_menuItemsPool.clear();
             return;
         }
 
         const InstalledApp* pApp = GetSelectedApp();
         if (!pApp) return;
 
-        HMENU hMenu = CreatePopupMenu();
-        InsertMenuW(hMenu, 0, MF_BYPOSITION | MF_STRING, IDM_ACTION_UNINSTALL, L"&Uninstall...\tEnter");
-        InsertMenuW(hMenu, 1, MF_BYPOSITION | MF_STRING, IDM_ACTION_FORCE_REMOVAL, L"&Force Removal...\tDel");
-        InsertMenuW(hMenu, 2, MF_BYPOSITION | MF_STRING, IDM_ACTION_REMOVE_ENTRY, L"&Remove Entry");
-        InsertMenuW(hMenu, 3, MF_BYPOSITION | MF_SEPARATOR, 0, nullptr);
-        InsertMenuW(hMenu, 4, MF_BYPOSITION | MF_STRING, IDM_ACTION_OPEN_REGISTRY, L"&Registry Entry");
-        
-        UINT folderFlag = MF_BYPOSITION | MF_STRING;
-        if (pApp->installLocation.empty()) folderFlag |= MF_GRAYED;
-        InsertMenuW(hMenu, 5, folderFlag, IDM_ACTION_OPEN_FOLDER, L"&Installation Folder");
-        InsertMenuW(hMenu, 6, MF_BYPOSITION | MF_STRING, IDM_ACTION_SEARCH_GOOGLE, L"&Google for...");
+        HMENU hMenu = CreateCustomPopupMenu();
+        AddCustomMenuItem(hMenu, IDM_ACTION_UNINSTALL, L"&Uninstall...\tEnter", false, false);
+        AddCustomMenuItem(hMenu, IDM_ACTION_FORCE_REMOVAL, L"&Force Removal...\tDel", false, false);
+        AddCustomMenuItem(hMenu, IDM_ACTION_REMOVE_ENTRY, L"&Remove Entry", false, false);
+        AddCustomSeparator(hMenu);
+        AddCustomMenuItem(hMenu, IDM_ACTION_OPEN_REGISTRY, L"&Registry Entry", false, false);
+        AddCustomMenuItem(hMenu, IDM_ACTION_OPEN_FOLDER, L"&Installation Folder", false, pApp->installLocation.empty());
+        AddCustomMenuItem(hMenu, IDM_ACTION_SEARCH_GOOGLE, L"&Google for...", false, false);
 
-        TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_TOPALIGN, x, y, 0, hWnd, nullptr);
+        TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_TOPALIGN, x, y, 0, g_hWndMain, nullptr);
         DestroyMenu(hMenu);
+        g_menuItemsPool.clear();
     }
 
     RECT GetTopMenuItemRect(HWND hWnd, int index) {
@@ -858,79 +1193,84 @@ namespace {
     }
 
     HMENU CreateSubMenuForIndex(int index) {
+        HMENU hMenu = CreateCustomPopupMenu();
+        if (!hMenu) return nullptr;
+
         switch (index) {
         case 0: { // File
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXPORT_HTML, L"Export to &HTML...\tCtrl+S");
-            AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXPORT_CSV, L"Export to &CSV...");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hMenu, MF_STRING, IDM_FILE_EXIT, L"E&xit\tAlt+F4");
+            AddCustomMenuItem(hMenu, IDM_FILE_EXPORT_HTML, L"Export to &HTML...\tCtrl+S");
+            AddCustomMenuItem(hMenu, IDM_FILE_EXPORT_CSV, L"Export to &CSV...");
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_FILE_EXIT, L"E&xit\tAlt+F4");
             return hMenu;
         }
         case 1: { // Action
-            HMENU hMenu = CreatePopupMenu();
             if (g_currentViewMode == AppViewMode::Processes) {
                 const ProcessItem* pProc = GetSelectedProcess();
-                UINT itemFlag = pProc ? MF_STRING : (MF_STRING | MF_GRAYED);
-                UINT pathFlag = (pProc && !pProc->fullPath.empty()) ? MF_STRING : (MF_STRING | MF_GRAYED);
+                bool hasProc = (pProc != nullptr);
+                bool hasPath = (pProc && !pProc->fullPath.empty());
 
-                AppendMenuW(hMenu, itemFlag, IDM_PROCESS_END_TASK, L"&End Task\tDel");
-                AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-                AppendMenuW(hMenu, pathFlag, IDM_PROCESS_OPEN_FOLDER, L"&Open File Location");
-                AppendMenuW(hMenu, pathFlag, IDM_PROCESS_PROPERTIES, L"&Properties");
-                AppendMenuW(hMenu, itemFlag, IDM_PROCESS_SEARCH_ONLINE, L"&Search Online");
-                AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-                AppendMenuW(hMenu, MF_STRING, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
+                AddCustomMenuItem(hMenu, IDM_PROCESS_END_TASK, L"&End Task\tDel", false, !hasProc);
+                AddCustomSeparator(hMenu);
+                AddCustomMenuItem(hMenu, IDM_PROCESS_OPEN_FOLDER, L"&Open File Location", false, !hasPath);
+                AddCustomMenuItem(hMenu, IDM_PROCESS_PROPERTIES, L"&Properties", false, !hasPath);
+                AddCustomMenuItem(hMenu, IDM_PROCESS_SEARCH_ONLINE, L"&Search Online", false, !hasProc);
+                AddCustomSeparator(hMenu);
+                AddCustomMenuItem(hMenu, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
             } else {
                 const InstalledApp* pApp = GetSelectedApp();
-                UINT itemFlag = pApp ? MF_STRING : (MF_STRING | MF_GRAYED);
-                UINT folderFlag = (pApp && !pApp->installLocation.empty()) ? MF_STRING : (MF_STRING | MF_GRAYED);
+                bool hasApp = (pApp != nullptr);
+                bool hasFolder = (pApp && !pApp->installLocation.empty());
 
-                AppendMenuW(hMenu, itemFlag, IDM_ACTION_UNINSTALL, L"&Uninstall...\tEnter");
-                AppendMenuW(hMenu, itemFlag, IDM_ACTION_FORCE_REMOVAL, L"&Force Removal...\tDel");
-                AppendMenuW(hMenu, itemFlag, IDM_ACTION_REMOVE_ENTRY, L"&Remove Entry");
-                AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-                AppendMenuW(hMenu, itemFlag, IDM_ACTION_OPEN_REGISTRY, L"&Registry Entry");
-                AppendMenuW(hMenu, folderFlag, IDM_ACTION_OPEN_FOLDER, L"&Installation Folder");
-                AppendMenuW(hMenu, itemFlag, IDM_ACTION_SEARCH_GOOGLE, L"&Google for...");
+                AddCustomMenuItem(hMenu, IDM_ACTION_UNINSTALL, L"&Uninstall...\tEnter", false, !hasApp);
+                AddCustomMenuItem(hMenu, IDM_ACTION_FORCE_REMOVAL, L"&Force Removal...\tDel", false, !hasApp);
+                AddCustomMenuItem(hMenu, IDM_ACTION_REMOVE_ENTRY, L"&Remove Entry", false, !hasApp);
+                AddCustomSeparator(hMenu);
+                AddCustomMenuItem(hMenu, IDM_ACTION_OPEN_REGISTRY, L"&Registry Entry", false, !hasApp);
+                AddCustomMenuItem(hMenu, IDM_ACTION_OPEN_FOLDER, L"&Installation Folder", false, !hasFolder);
+                AddCustomMenuItem(hMenu, IDM_ACTION_SEARCH_GOOGLE, L"&Google for...", false, !hasApp);
             }
             return hMenu;
         }
         case 2: { // Processes
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING | (g_currentViewMode == AppViewMode::Processes ? MF_CHECKED : MF_UNCHECKED),
-                        IDM_VIEW_PROCESSES, L"&Running Processes\tCtrl+3");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+            AddCustomMenuItem(hMenu, IDM_VIEW_PROCESSES, L"&Running Processes\tCtrl+3", g_currentViewMode == AppViewMode::Processes);
+            AddCustomSeparator(hMenu);
             const ProcessItem* pProc = GetSelectedProcess();
-            UINT itemFlag = pProc ? MF_STRING : (MF_STRING | MF_GRAYED);
-            UINT pathFlag = (pProc && !pProc->fullPath.empty()) ? MF_STRING : (MF_STRING | MF_GRAYED);
-            AppendMenuW(hMenu, itemFlag, IDM_PROCESS_END_TASK, L"&End Task\tDel");
-            AppendMenuW(hMenu, pathFlag, IDM_PROCESS_OPEN_FOLDER, L"&Open File Location");
-            AppendMenuW(hMenu, pathFlag, IDM_PROCESS_PROPERTIES, L"&Properties");
-            AppendMenuW(hMenu, itemFlag, IDM_PROCESS_SEARCH_ONLINE, L"&Search Online");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hMenu, MF_STRING, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
+            bool hasProc = (pProc != nullptr);
+            bool hasPath = (pProc && !pProc->fullPath.empty());
+            AddCustomMenuItem(hMenu, IDM_PROCESS_END_TASK, L"&End Task\tDel", false, !hasProc);
+            AddCustomMenuItem(hMenu, IDM_PROCESS_OPEN_FOLDER, L"&Open File Location", false, !hasPath);
+            AddCustomMenuItem(hMenu, IDM_PROCESS_PROPERTIES, L"&Properties", false, !hasPath);
+            AddCustomMenuItem(hMenu, IDM_PROCESS_SEARCH_ONLINE, L"&Search Online", false, !hasProc);
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
             return hMenu;
         }
         case 3: { // View
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING | (g_currentViewMode == AppViewMode::Desktop ? MF_CHECKED : MF_UNCHECKED),
-                        IDM_VIEW_DESKTOP_APPS, L"&Desktop Apps\tCtrl+1");
-            AppendMenuW(hMenu, MF_STRING | (g_currentViewMode == AppViewMode::WindowsStore ? MF_CHECKED : MF_UNCHECKED),
-                        IDM_VIEW_STORE_APPS, L"Windows &Store Apps\tCtrl+2");
-            AppendMenuW(hMenu, MF_STRING | (g_currentViewMode == AppViewMode::Processes ? MF_CHECKED : MF_UNCHECKED),
-                        IDM_VIEW_PROCESSES, L"&Processes\tCtrl+3");
-            AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(hMenu, MF_STRING, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
+            AddCustomMenuItem(hMenu, IDM_VIEW_DESKTOP_APPS, L"&Desktop Apps\tCtrl+1", g_currentViewMode == AppViewMode::Desktop, false, false, true);
+            AddCustomMenuItem(hMenu, IDM_VIEW_STORE_APPS, L"Windows &Store Apps\tCtrl+2", g_currentViewMode == AppViewMode::WindowsStore, false, false, true);
+            AddCustomMenuItem(hMenu, IDM_VIEW_PROCESSES, L"&Processes\tCtrl+3", g_currentViewMode == AppViewMode::Processes, false, false, true);
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_VIEW_REFRESH, L"&Refresh\tCtrl+R");
             return hMenu;
         }
-        case 4: { // Help
-            HMENU hMenu = CreatePopupMenu();
-            AppendMenuW(hMenu, MF_STRING, IDM_HELP_ABOUT, L"&About Zero...");
+        case 4: { // Settings
+            AddCustomMenuItem(hMenu, IDM_SETTINGS_DARK_MODE, L"&Dark Mode", g_isDarkMode, false, false, true);
+            AddCustomMenuItem(hMenu, IDM_SETTINGS_LIGHT_MODE, L"&Light Mode", !g_isDarkMode, false, false, true);
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_SETTINGS_SIZE_COMPACT, L"&Compact Cards (Small)", g_rowSizeMode == RowSizeMode::Compact, false, false, true);
+            AddCustomMenuItem(hMenu, IDM_SETTINGS_SIZE_NORMAL, L"&Normal Cards (Medium)", g_rowSizeMode == RowSizeMode::Normal, false, false, true);
+            AddCustomMenuItem(hMenu, IDM_SETTINGS_SIZE_LARGE, L"&Large Cards (Expanded)", g_rowSizeMode == RowSizeMode::Large, false, false, true);
+            return hMenu;
+        }
+        case 5: { // Help
+            AddCustomMenuItem(hMenu, IDM_HELP_CHECK_UPDATES, L"&Check for Updates...");
+            AddCustomSeparator(hMenu);
+            AddCustomMenuItem(hMenu, IDM_HELP_ABOUT, L"&About Zero...");
             return hMenu;
         }
         }
-        return nullptr;
+        return hMenu;
     }
 
     void OpenTopMenu(int index) {
@@ -950,6 +1290,7 @@ namespace {
         TPMPARAMS tpm = { sizeof(tpm) };
         tpm.rcExclude = rcItemScreen;
 
+        g_menuItemsPool.clear();
         HMENU hPopup = CreateSubMenuForIndex(index);
         if (!hPopup) return;
 
@@ -960,6 +1301,7 @@ namespace {
         TrackPopupMenuEx(hPopup, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_VERTICAL, pt.x, pt.y, g_hWndMain, &tpm);
 
         DestroyMenu(hPopup);
+        g_menuItemsPool.clear();
         g_topMenuOpenIndex = -1;
         InvalidateRect(g_hTopMenuBar, nullptr, FALSE);
     }
@@ -998,22 +1340,31 @@ namespace {
                 bool isCurrentMode = (i == 2 && g_currentViewMode == AppViewMode::Processes);
 
                 if (isActive || isHover || isCurrentMode) {
-                    COLORREF bg = isActive ? RGB(50, 50, 50) : (isCurrentMode ? RGB(40, 40, 40) : RGB(35, 35, 35));
+                    COLORREF bg;
+                    COLORREF frameCol;
+                    if (g_isDarkMode) {
+                        bg = isActive ? RGB(34, 44, 61) : (isCurrentMode ? RGB(28, 36, 51) : RGB(30, 39, 54));
+                        frameCol = isActive ? RGB(0, 120, 215) : (isCurrentMode ? RGB(0, 120, 215) : RGB(55, 70, 95));
+                    } else {
+                        bg = isActive ? RGB(218, 222, 230) : (isCurrentMode ? RGB(228, 232, 240) : RGB(232, 236, 242));
+                        frameCol = isActive ? RGB(0, 120, 215) : (isCurrentMode ? RGB(0, 120, 215) : RGB(200, 205, 215));
+                    }
                     HBRUSH hBrHover = CreateSolidBrush(bg);
                     FillRect(memDC, &rcItem, hBrHover);
                     DeleteObject(hBrHover);
 
-                    COLORREF frameCol = isActive ? RGB(75, 75, 75) : (isCurrentMode ? RGB(224, 86, 46) : RGB(55, 55, 55));
                     HPEN hPenFrame = CreatePen(PS_SOLID, 1, frameCol);
                     HPEN oldFramePen = (HPEN)SelectObject(memDC, hPenFrame);
                     HBRUSH oldNullBr = (HBRUSH)SelectObject(memDC, GetStockObject(NULL_BRUSH));
-                    Rectangle(memDC, rcItem.left, rcItem.top, rcItem.right, rcItem.bottom);
+                    RoundRect(memDC, rcItem.left, rcItem.top, rcItem.right, rcItem.bottom, 4, 4);
                     SelectObject(memDC, oldNullBr);
                     SelectObject(memDC, oldFramePen);
                     DeleteObject(hPenFrame);
                 }
 
-                SetTextColor(memDC, (isActive || isHover || isCurrentMode) ? CLR_TEXT_SELECTED : CLR_TEXT_NORMAL);
+                SetTextColor(memDC, (isActive || isHover || isCurrentMode)
+                    ? (g_isDarkMode ? CLR_TEXT_SELECTED : (isCurrentMode ? RGB(0, 120, 215) : RGB(20, 20, 20)))
+                    : CLR_TEXT_NORMAL);
                 DrawTextW(memDC, g_topMenuNames[i], -1, &rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
 
@@ -1071,6 +1422,133 @@ namespace {
         return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 
+    void HandleAppHeaderClick(int col, HWND hHeaderWnd) {
+        if (col == 0) {
+            // Program Name: Toggle A->Z and Z->A
+            if (g_appSortColumn == AppSortColumn::Name) {
+                g_appSortAscending = !g_appSortAscending;
+            } else {
+                g_appSortColumn = AppSortColumn::Name;
+                g_appSortAscending = true;
+            }
+            SortApplications();
+            PopulateMainListView();
+            if (hHeaderWnd) InvalidateRect(hHeaderWnd, nullptr, FALSE);
+            if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+            return;
+        }
+
+        if (col == 1) {
+            // Size: Popup Menu (Largest to Smallest, Smallest to Largest)
+            g_menuItemsPool.clear();
+            HMENU hMenu = CreateCustomPopupMenu();
+            if (hMenu) {
+                bool isDesc = (g_appSortColumn == AppSortColumn::Size && !g_appSortAscending);
+                bool isAsc  = (g_appSortColumn == AppSortColumn::Size && g_appSortAscending);
+                AddCustomMenuItem(hMenu, IDM_SORT_SIZE_DESC, L"Sort Largest to Smallest", isDesc, false, false, true);
+                AddCustomMenuItem(hMenu, IDM_SORT_SIZE_ASC,  L"Sort Smallest to Largest", isAsc,  false, false, true);
+
+                RECT rcCol = { 0 };
+                Header_GetItemRect(hHeaderWnd, 1, &rcCol);
+                POINT pt = { rcCol.right, rcCol.bottom };
+                ClientToScreen(hHeaderWnd, &pt);
+
+                UINT cmd = TrackPopupMenu(hMenu, TPM_RIGHTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, g_hWndMain, nullptr);
+                DestroyMenu(hMenu);
+                g_menuItemsPool.clear();
+
+                if (cmd == IDM_SORT_SIZE_DESC) {
+                    g_appSortColumn = AppSortColumn::Size;
+                    g_appSortAscending = false;
+                    SortApplications();
+                    PopulateMainListView();
+                    if (hHeaderWnd) InvalidateRect(hHeaderWnd, nullptr, FALSE);
+                    if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                } else if (cmd == IDM_SORT_SIZE_ASC) {
+                    g_appSortColumn = AppSortColumn::Size;
+                    g_appSortAscending = true;
+                    SortApplications();
+                    PopulateMainListView();
+                    if (hHeaderWnd) InvalidateRect(hHeaderWnd, nullptr, FALSE);
+                    if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                }
+            }
+            return;
+        }
+
+        if (col == 2) {
+            // Installed On: Popup Menu (Newest to Oldest, Oldest to Newest)
+            g_menuItemsPool.clear();
+            HMENU hMenu = CreateCustomPopupMenu();
+            if (hMenu) {
+                bool isDesc = (g_appSortColumn == AppSortColumn::Date && !g_appSortAscending);
+                bool isAsc  = (g_appSortColumn == AppSortColumn::Date && g_appSortAscending);
+                AddCustomMenuItem(hMenu, IDM_SORT_DATE_DESC, L"Sort Newest to Oldest", isDesc, false, false, true);
+                AddCustomMenuItem(hMenu, IDM_SORT_DATE_ASC,  L"Sort Oldest to Newest", isAsc,  false, false, true);
+
+                RECT rcCol = { 0 };
+                Header_GetItemRect(hHeaderWnd, 2, &rcCol);
+                POINT pt = { rcCol.right, rcCol.bottom };
+                ClientToScreen(hHeaderWnd, &pt);
+
+                UINT cmd = TrackPopupMenu(hMenu, TPM_RIGHTALIGN | TPM_TOPALIGN | TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, g_hWndMain, nullptr);
+                DestroyMenu(hMenu);
+                g_menuItemsPool.clear();
+
+                if (cmd == IDM_SORT_DATE_DESC) {
+                    g_appSortColumn = AppSortColumn::Date;
+                    g_appSortAscending = false;
+                    SortApplications();
+                    PopulateMainListView();
+                    if (hHeaderWnd) InvalidateRect(hHeaderWnd, nullptr, FALSE);
+                    if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                } else if (cmd == IDM_SORT_DATE_ASC) {
+                    g_appSortColumn = AppSortColumn::Date;
+                    g_appSortAscending = true;
+                    SortApplications();
+                    PopulateMainListView();
+                    if (hHeaderWnd) InvalidateRect(hHeaderWnd, nullptr, FALSE);
+                    if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                }
+            }
+            return;
+        }
+    }
+
+    void OnHeaderColumnClick(int col, HWND hHeaderWnd) {
+        if (col < 0) return;
+
+        static ULONGLONG s_lastClickTick = 0;
+        static int s_lastClickCol = -1;
+        ULONGLONG now = GetTickCount64();
+        if (now - s_lastClickTick < 200 && s_lastClickCol == col) {
+            return; // debounce duplicate messages
+        }
+        s_lastClickTick = now;
+        s_lastClickCol = col;
+
+        if (g_currentViewMode == AppViewMode::Processes) {
+            if (col >= 0 && col <= 4) {
+                if (g_processSortColumn == col) {
+                    g_processSortAscending = !g_processSortAscending;
+                } else {
+                    g_processSortColumn = col;
+                    g_processSortAscending = (col == 0);
+                }
+                SortProcesses();
+                PopulateMainListView();
+                if (hHeaderWnd) InvalidateRect(hHeaderWnd, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+            }
+            return;
+        }
+
+        // Apps Mode (Desktop / Store)
+        if (col >= 0 && col <= 2) {
+            HandleAppHeaderClick(col, hHeaderWnd);
+        }
+    }
+
     LRESULT CALLBACK HeaderSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
         switch (uMsg) {
         case HDM_LAYOUT: {
@@ -1099,19 +1577,9 @@ namespace {
             hti.pt.x = GET_X_LPARAM(lParam);
             hti.pt.y = GET_Y_LPARAM(lParam);
             SendMessage(hWnd, HDM_HITTEST, 0, (LPARAM)&hti);
-            if ((hti.flags & HHT_ONHEADER) && hti.iItem >= 0 && hti.iItem <= 4) {
-                if (g_currentViewMode == AppViewMode::Processes) {
-                    int col = hti.iItem;
-                    if (g_processSortColumn == col) {
-                        g_processSortAscending = !g_processSortAscending;
-                    } else {
-                        g_processSortColumn = col;
-                        g_processSortAscending = (col == 0);
-                    }
-                    SortProcesses();
-                    PopulateMainListView();
-                    InvalidateRect(hWnd, nullptr, FALSE);
-                }
+            if ((hti.flags & HHT_ONHEADER) && hti.iItem >= 0) {
+                OnHeaderColumnClick(hti.iItem, hWnd);
+                return 0;
             }
             break;
         }
@@ -1148,7 +1616,7 @@ namespace {
                     bool isSorted = (i == g_processSortColumn);
                     if (isSorted) {
                         // Subtle highlight for sorted header column
-                        HBRUSH hBrSortHdr = CreateSolidBrush(RGB(32, 36, 42));
+                        HBRUSH hBrSortHdr = CreateSolidBrush(g_isDarkMode ? RGB(32, 36, 42) : RGB(225, 230, 238));
                         FillRect(memDC, &rcItem, hBrSortHdr);
                         DeleteObject(hBrSortHdr);
 
@@ -1245,12 +1713,17 @@ namespace {
                     hdi.cchTextMax = 128;
                     Header_GetItem(hWnd, i, &hdi);
 
+                    std::wstring label = text;
+                    if (static_cast<int>(g_appSortColumn) == i) {
+                        label += g_appSortAscending ? L"  \x25B4" : L"  \x25BE";
+                    }
+
                     RECT rcText = rcItem;
                     rcText.left += ScaleDpi(12, dpi);
                     rcText.right -= (i == 0) ? ScaleDpi(12, dpi) : ScaleDpi(20, dpi);
 
                     UINT align = (i == 0) ? DT_LEFT : DT_RIGHT;
-                    DrawTextW(memDC, text, -1, &rcText, align | DT_VCENTER | DT_SINGLELINE);
+                    DrawTextW(memDC, label.c_str(), -1, &rcText, align | DT_VCENTER | DT_SINGLELINE);
                 }
                 SelectObject(memDC, oldFont);
             }
@@ -1272,6 +1745,24 @@ namespace {
 
         case WM_NCDESTROY:
             RemoveWindowSubclass(hWnd, HeaderSubclassProc, uIdSubclass);
+            break;
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    LRESULT CALLBACK MainListSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+        switch (uMsg) {
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            HBRUSH hBr = CreateSolidBrush(CLR_BG_EVEN);
+            FillRect(hdc, &rc, hBr);
+            DeleteObject(hBr);
+            return 1;
+        }
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(hWnd, MainListSubclassProc, uIdSubclass);
             break;
         }
         return DefSubclassProc(hWnd, uMsg, wParam, lParam);
@@ -1308,6 +1799,10 @@ namespace {
                     FilterApplications();
                 }
                 if (g_hBottomBar) InvalidateRect(g_hBottomBar, &g_rcCapsule, FALSE);
+                return 0;
+            }
+            if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'F' || wParam == 'f')) {
+                SendMessage(hWnd, EM_SETSEL, 0, -1);
                 return 0;
             }
             if ((GetKeyState(VK_CONTROL) & 0x8000) && (wParam == 'R' || wParam == 'r')) {
@@ -1385,17 +1880,18 @@ namespace {
                 path.CloseFigure();
 
                 // Fill capsule background
-                Gdiplus::SolidBrush fillBrush(Gdiplus::Color(255, 38, 38, 38)); // Match CLR_EDIT_BG (#262626)
+                Gdiplus::Color fillCol(255, GetRValue(CLR_EDIT_BG), GetGValue(CLR_EDIT_BG), GetBValue(CLR_EDIT_BG));
+                Gdiplus::SolidBrush fillBrush(fillCol);
                 graphics.FillPath(&fillBrush, &path);
 
-                // Border: Coral/Orange if focused, lighter gray if hovered, dark subtle gray default
+                // Border: Coral/Orange if focused, lighter gray if hovered, subtle gray default
                 Gdiplus::Color borderColor;
                 if (g_searchHasFocus) {
                     borderColor = Gdiplus::Color(255, 224, 86, 46); // Accent #E0562E
                 } else if (g_searchIsHovered) {
-                    borderColor = Gdiplus::Color(255, 80, 80, 80);
+                    borderColor = g_isDarkMode ? Gdiplus::Color(255, 80, 80, 80) : Gdiplus::Color(255, 175, 175, 175);
                 } else {
-                    borderColor = Gdiplus::Color(255, 52, 52, 52);
+                    borderColor = g_isDarkMode ? Gdiplus::Color(255, 52, 52, 52) : Gdiplus::Color(255, 205, 205, 205);
                 }
                 Gdiplus::Pen borderPen(borderColor, 1.0f);
                 graphics.DrawPath(&borderPen, &path);
@@ -1405,7 +1901,9 @@ namespace {
                 float iconX = cx + r - (float)ScaleDpi(2, dpi);
                 float iconY = cy + (ch - iconDiam) / 2.0f - (float)ScaleDpi(0.5f, dpi);
 
-                Gdiplus::Color iconColor = g_searchHasFocus ? Gdiplus::Color(255, 224, 86, 46) : Gdiplus::Color(255, 140, 140, 140);
+                Gdiplus::Color iconColor = g_searchHasFocus
+                    ? Gdiplus::Color(255, 224, 86, 46)
+                    : (g_isDarkMode ? Gdiplus::Color(255, 140, 140, 140) : Gdiplus::Color(255, 120, 120, 120));
                 Gdiplus::Pen iconPen(iconColor, (float)ScaleDpi(1.4f, dpi));
                 graphics.DrawEllipse(&iconPen, iconX, iconY, iconDiam, iconDiam);
 
@@ -1421,7 +1919,9 @@ namespace {
                     float closeX = cx + cw - r + (float)ScaleDpi(1, dpi);
                     float closeY = cy + ch / 2.0f;
                     float arm = (float)ScaleDpi(3.5f, dpi);
-                    Gdiplus::Color closeColor = g_searchClearHovered ? Gdiplus::Color(255, 230, 230, 230) : Gdiplus::Color(255, 140, 140, 140);
+                    Gdiplus::Color closeColor = g_searchClearHovered
+                        ? (g_isDarkMode ? Gdiplus::Color(255, 230, 230, 230) : Gdiplus::Color(255, 40, 40, 40))
+                        : (g_isDarkMode ? Gdiplus::Color(255, 140, 140, 140) : Gdiplus::Color(255, 120, 120, 120));
                     Gdiplus::Pen closePen(closeColor, (float)ScaleDpi(1.3f, dpi));
                     graphics.DrawLine(&closePen, closeX - arm, closeY - arm, closeX + arm, closeY + arm);
                     graphics.DrawLine(&closePen, closeX - arm, closeY + arm, closeX + arm, closeY - arm);
@@ -1623,7 +2123,7 @@ namespace {
                 SetBkMode(hdc, TRANSPARENT);
 
                 UINT dpi = GetWindowDpi(g_hWndMain);
-                int iconSize = ScaleDpi(16, dpi);
+                int iconSize = GetCurrentIconSize(dpi);
 
                 // Column 0: Name (+ chevron if grouped + icon)
                 int col0Width = ListView_GetColumnWidth(g_hListView, 0);
@@ -1633,7 +2133,9 @@ namespace {
                 // Subtle tint for sorted column across rows when not selected
                 auto DrawSortedColumnTint = [&](const RECT& rcCol, int colIndex) {
                     if (!isSelected && g_processSortColumn == colIndex) {
-                        COLORREF tintCol = (iItem % 2 == 0) ? RGB(30, 32, 38) : RGB(36, 38, 44);
+                        COLORREF tintCol = g_isDarkMode
+                            ? ((iItem % 2 == 0) ? RGB(30, 32, 38) : RGB(36, 38, 44))
+                            : ((iItem % 2 == 0) ? RGB(238, 242, 248) : RGB(230, 235, 242));
                         HBRUSH hBrTint = CreateSolidBrush(tintCol);
                         FillRect(hdc, &rcCol, hBrTint);
                         DeleteObject(hBrTint);
@@ -1765,7 +2267,7 @@ namespace {
             SetBkMode(hdc, TRANSPARENT);
 
             UINT dpi = GetWindowDpi(g_hWndMain);
-            int iconSize = ScaleDpi(18, dpi);
+            int iconSize = GetCurrentIconSize(dpi);
 
             // 2. Column 0: Program Name + Icon + (32-bit tag)
             int col0Width = ListView_GetColumnWidth(g_hListView, 0);
@@ -1798,7 +2300,7 @@ namespace {
                 if (rcName.left + sz.cx + ScaleDpi(6, dpi) < rcName.right) {
                     RECT rcTag = rcName;
                     rcTag.left += sz.cx + ScaleDpi(6, dpi);
-                    SetTextColor(hdc, isSelected ? RGB(255, 230, 200) : CLR_TEXT_MUTED);
+                    SetTextColor(hdc, isSelected ? RGB(200, 230, 255) : CLR_TEXT_MUTED);
                     DrawTextW(hdc, L"(32-bit)", -1, &rcTag, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
                 }
             } else {
@@ -1809,18 +2311,22 @@ namespace {
             int col1Width = ListView_GetColumnWidth(g_hListView, 1);
             RECT rcCol1 = rcItem;
             rcCol1.left = rcCol0.right;
-            rcCol1.right = rcCol1.left + col1Width - ScaleDpi(16, dpi);
+            rcCol1.right = rcCol1.left + col1Width;
+            RECT rcText1 = rcCol1;
+            rcText1.right -= ScaleDpi(16, dpi);
 
             SetTextColor(hdc, isSelected ? CLR_TEXT_SELECTED : CLR_TEXT_NORMAL);
-            DrawTextW(hdc, app.sizeFormatted.c_str(), -1, &rcCol1, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            DrawTextW(hdc, app.sizeFormatted.c_str(), -1, &rcText1, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
             // 4. Column 2: Installed On (Right Aligned)
             int col2Width = ListView_GetColumnWidth(g_hListView, 2);
             RECT rcCol2 = rcItem;
-            rcCol2.left = rcCol0.right + col1Width;
-            rcCol2.right = rcCol2.left + col2Width - ScaleDpi(20, dpi);
+            rcCol2.left = rcCol1.right;
+            rcCol2.right = rcCol2.left + col2Width;
+            RECT rcText2 = rcCol2;
+            rcText2.right -= ScaleDpi(20, dpi);
 
-            DrawTextW(hdc, app.installDate.c_str(), -1, &rcCol2, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+            DrawTextW(hdc, app.installDate.c_str(), -1, &rcText2, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
             SelectObject(hdc, hOldFont);
             return CDRF_SKIPDEFAULT;
@@ -1920,10 +2426,12 @@ namespace {
             g_hBrushEdit = CreateSolidBrush(CLR_EDIT_BG);
 
             // Enable Windows 10/11 Immersive Dark Title Bar and Popup Theme
-            BOOL darkMode = TRUE;
+            BOOL darkMode = g_isDarkMode ? TRUE : FALSE;
             DwmSetWindowAttribute(hWnd, 20, &darkMode, sizeof(darkMode)); // DWMWA_USE_IMMERSIVE_DARK_MODE (Win10 20H1+ & Win11)
             DwmSetWindowAttribute(hWnd, 19, &darkMode, sizeof(darkMode)); // Older Win10 builds
-            EnableDarkThemeUx();
+            if (g_isDarkMode) {
+                EnableDarkThemeUx();
+            }
 
             // Register and Create Custom Top Menu Bar (Matches Bottom Bar Color #1A1A1A)
             const wchar_t* TOP_MENU_CLASS = L"ZeroTopMenuBarClass";
@@ -1944,6 +2452,11 @@ namespace {
                 0, 0, 0, 0, hWnd, (HMENU)IDC_APP_LISTVIEW, g_hInstance, nullptr);
 
             ListView_SetExtendedListViewStyle(g_hListView, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+            ListView_SetBkColor(g_hListView, CLR_BG_EVEN);
+            ListView_SetTextBkColor(g_hListView, CLR_BG_EVEN);
+            ListView_SetTextColor(g_hListView, CLR_TEXT_NORMAL);
+            SetWindowTheme(g_hListView, g_isDarkMode ? L"DarkMode_Explorer" : L"Explorer", nullptr);
+            SetWindowSubclass(g_hListView, MainListSubclassProc, 1, 0);
             SendMessage(g_hListView, WM_SETFONT, (WPARAM)g_hFont, TRUE);
 
             g_hHeader = ListView_GetHeader(g_hListView);
@@ -2015,6 +2528,183 @@ namespace {
             return 0;
         }
 
+        case WM_MEASUREITEM: {
+            MEASUREITEMSTRUCT* pMIS = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+            if (pMIS->CtlType == ODT_MENU && pMIS->itemData) {
+                CustomMenuItem* pItem = reinterpret_cast<CustomMenuItem*>(pMIS->itemData);
+                UINT dpi = GetWindowDpi(hWnd);
+
+                if (pItem->isSeparator) {
+                    pMIS->itemWidth = ScaleDpi(160, dpi);
+                    pMIS->itemHeight = ScaleDpi(7, dpi);
+                    return TRUE;
+                }
+
+                HDC hdc = GetDC(hWnd);
+                HFONT hOldFont = (HFONT)SelectObject(hdc, g_hFontStatus ? g_hFontStatus : (HFONT)GetStockObject(DEFAULT_GUI_FONT));
+
+                SIZE szText = { 0 };
+                GetTextExtentPoint32W(hdc, pItem->text.c_str(), static_cast<int>(pItem->text.length()), &szText);
+
+                SIZE szShortcut = { 0 };
+                if (!pItem->shortcut.empty()) {
+                    GetTextExtentPoint32W(hdc, pItem->shortcut.c_str(), static_cast<int>(pItem->shortcut.length()), &szShortcut);
+                }
+
+                SelectObject(hdc, hOldFont);
+                ReleaseDC(hWnd, hdc);
+
+                int checkWidth = ScaleDpi(24, dpi);
+                int gap = ScaleDpi(30, dpi);
+                int paddingRight = ScaleDpi(16, dpi);
+
+                int totalWidth = checkWidth + szText.cx + (szShortcut.cx > 0 ? (gap + szShortcut.cx) : 0) + paddingRight;
+                int minWidth = ScaleDpi(200, dpi);
+                if (totalWidth < minWidth) totalWidth = minWidth;
+
+                pMIS->itemWidth = totalWidth;
+                pMIS->itemHeight = ScaleDpi(28, dpi);
+                return TRUE;
+            }
+            break;
+        }
+
+        case WM_DRAWITEM: {
+            DRAWITEMSTRUCT* pDIS = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+            if (pDIS->CtlType == ODT_MENU && pDIS->itemData) {
+                CustomMenuItem* pItem = reinterpret_cast<CustomMenuItem*>(pDIS->itemData);
+                HDC hdc = pDIS->hDC;
+                RECT rc = pDIS->rcItem;
+                UINT dpi = GetWindowDpi(hWnd);
+
+                bool isSelected = (pDIS->itemState & ODS_SELECTED) != 0;
+                bool isDisabled = (pDIS->itemState & (ODS_GRAYED | ODS_DISABLED)) != 0;
+                bool isChecked = pItem->isChecked;
+
+                // 1. Menu Background
+                COLORREF bgMenu = g_isDarkMode ? CLR_HEADER_BG : RGB(255, 255, 255);
+                HBRUSH hBrBg = CreateSolidBrush(bgMenu);
+                FillRect(hdc, &rc, hBrBg);
+                DeleteObject(hBrBg);
+
+                if (pItem->isSeparator) {
+                    int lineY = rc.top + (rc.bottom - rc.top) / 2;
+                    int marginX = ScaleDpi(10, dpi);
+                    COLORREF sepColor = g_isDarkMode ? CLR_BOTTOM_BORDER : RGB(225, 228, 232);
+                    HPEN hPen = CreatePen(PS_SOLID, 1, sepColor);
+                    HPEN oldPen = (HPEN)SelectObject(hdc, hPen);
+                    MoveToEx(hdc, rc.left + marginX, lineY, nullptr);
+                    LineTo(hdc, rc.right - marginX, lineY);
+                    SelectObject(hdc, oldPen);
+                    DeleteObject(hPen);
+                    return TRUE;
+                }
+
+                // 2. Selection highlight (anti-aliased rounded rectangle)
+                if (isSelected && !isDisabled) {
+                    RECT rcSel = rc;
+                    int insetX = ScaleDpi(3, dpi);
+                    int insetY = ScaleDpi(1, dpi);
+                    rcSel.left += insetX;
+                    rcSel.right -= insetX;
+                    rcSel.top += insetY;
+                    rcSel.bottom -= insetY;
+
+                    Gdiplus::Graphics g(hdc);
+                    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+                    float x = (float)rcSel.left;
+                    float y = (float)rcSel.top;
+                    float w = (float)(rcSel.right - rcSel.left);
+                    float h = (float)(rcSel.bottom - rcSel.top);
+                    float r = (float)ScaleDpi(4, dpi);
+
+                    Gdiplus::GraphicsPath path;
+                    path.AddArc(x, y, r * 2, r * 2, 180, 90);
+                    path.AddArc(x + w - r * 2, y, r * 2, r * 2, 270, 90);
+                    path.AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0, 90);
+                    path.AddArc(x, y + h - r * 2, r * 2, r * 2, 90, 90);
+                    path.CloseFigure();
+
+                    Gdiplus::SolidBrush selBr(Gdiplus::Color(255, 0, 120, 215)); // Accent Blue
+                    g.FillPath(&selBr, &path);
+                }
+
+                // 3. Checkmark
+                int iconAreaWidth = ScaleDpi(22, dpi);
+                int checkX = rc.left + ScaleDpi(6, dpi);
+                if (isChecked) {
+                    COLORREF checkCol = (isSelected && !isDisabled) ? RGB(255, 255, 255) : (g_isDarkMode ? RGB(0, 150, 255) : RGB(0, 120, 215));
+                    SetTextColor(hdc, checkCol);
+                    SetBkMode(hdc, TRANSPARENT);
+                    HFONT hOldFont = (HFONT)SelectObject(hdc, g_hFontBold ? g_hFontBold : g_hFontStatus);
+                    RECT rcCheck = { checkX, rc.top, checkX + iconAreaWidth, rc.bottom };
+                    DrawTextW(hdc, pItem->isRadio ? L"●" : L"✓", -1, &rcCheck, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+                    SelectObject(hdc, hOldFont);
+                }
+
+                // 4. Text
+                RECT rcText = rc;
+                rcText.left += iconAreaWidth + ScaleDpi(8, dpi);
+                rcText.right -= ScaleDpi(12, dpi);
+
+                COLORREF textCol;
+                if (isDisabled) {
+                    textCol = g_isDarkMode ? RGB(90, 105, 125) : RGB(160, 160, 160);
+                } else if (isSelected) {
+                    textCol = RGB(255, 255, 255);
+                } else {
+                    textCol = g_isDarkMode ? CLR_TEXT_NORMAL : RGB(30, 30, 30);
+                }
+
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, textCol);
+                HFONT hOldFont = (HFONT)SelectObject(hdc, g_hFontStatus);
+
+                DrawTextW(hdc, pItem->text.c_str(), -1, &rcText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+                // 5. Shortcut text
+                if (!pItem->shortcut.empty()) {
+                    COLORREF shortcutCol;
+                    if (isDisabled) {
+                        shortcutCol = g_isDarkMode ? RGB(90, 105, 125) : RGB(160, 160, 160);
+                    } else if (isSelected) {
+                        shortcutCol = RGB(220, 235, 255);
+                    } else {
+                        shortcutCol = g_isDarkMode ? CLR_TEXT_MUTED : RGB(130, 130, 130);
+                    }
+                    SetTextColor(hdc, shortcutCol);
+                    DrawTextW(hdc, pItem->shortcut.c_str(), -1, &rcText, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+                }
+
+                SelectObject(hdc, hOldFont);
+                return TRUE;
+            }
+            break;
+        }
+
+        case WM_MENUCHAR: {
+            wchar_t ch = towlower((wchar_t)LOWORD(wParam));
+            HMENU hMenu = (HMENU)lParam;
+            int count = GetMenuItemCount(hMenu);
+            for (int i = 0; i < count; ++i) {
+                MENUITEMINFO mi = { sizeof(mi) };
+                mi.fMask = MIIM_DATA;
+                if (GetMenuItemInfoW(hMenu, i, TRUE, &mi) && mi.dwItemData) {
+                    CustomMenuItem* pItem = reinterpret_cast<CustomMenuItem*>(mi.dwItemData);
+                    if (!pItem->isSeparator && !pItem->isDisabled) {
+                        size_t amp = pItem->text.find(L'&');
+                        if (amp != std::wstring::npos && amp + 1 < pItem->text.length()) {
+                            if (towlower(pItem->text[amp + 1]) == ch) {
+                                return MAKELRESULT(i, MNC_EXECUTE);
+                            }
+                        }
+                    }
+                }
+            }
+            return MAKELRESULT(0, MNC_IGNORE);
+        }
+
         case WM_NOTIFY: {
             LPNMHDR pnm = reinterpret_cast<LPNMHDR>(lParam);
 
@@ -2031,39 +2721,13 @@ namespace {
             // Column Header Click (for sorting)
             if (pnm->idFrom == IDC_APP_LISTVIEW && pnm->code == LVN_COLUMNCLICK) {
                 NMLISTVIEW* pnmlv = reinterpret_cast<NMLISTVIEW*>(lParam);
-                int col = pnmlv->iSubItem;
-                if (g_currentViewMode == AppViewMode::Processes) {
-                    if (col >= 0 && col <= 4) {
-                        if (g_processSortColumn == col) {
-                            g_processSortAscending = !g_processSortAscending;
-                        } else {
-                            g_processSortColumn = col;
-                            g_processSortAscending = (col == 0);
-                        }
-                        SortProcesses();
-                        PopulateMainListView();
-                        if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
-                    }
-                }
+                OnHeaderColumnClick(pnmlv->iSubItem, g_hHeader);
                 return 0;
             }
 
             if (pnm->hwndFrom == g_hHeader && (pnm->code == HDN_ITEMCLICKW || pnm->code == HDN_ITEMCLICKA)) {
                 NMHEADERW* pnmh = reinterpret_cast<NMHEADERW*>(lParam);
-                int col = pnmh->iItem;
-                if (g_currentViewMode == AppViewMode::Processes) {
-                    if (col >= 0 && col <= 4) {
-                        if (g_processSortColumn == col) {
-                            g_processSortAscending = !g_processSortAscending;
-                        } else {
-                            g_processSortColumn = col;
-                            g_processSortAscending = (col == 0);
-                        }
-                        SortProcesses();
-                        PopulateMainListView();
-                        if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
-                    }
-                }
+                OnHeaderColumnClick(pnmh->iItem, g_hHeader);
                 return 0;
             }
 
@@ -2155,8 +2819,74 @@ namespace {
                     ReloadApplications();
                 }
                 return 0;
+            case IDM_SETTINGS_DARK_MODE:
+                UpdateTheme(true);
+                return 0;
+            case IDM_SETTINGS_LIGHT_MODE:
+                UpdateTheme(false);
+                return 0;
+            case IDM_SETTINGS_SIZE_COMPACT:
+                ApplyRowSizeMode(RowSizeMode::Compact);
+                return 0;
+            case IDM_SETTINGS_SIZE_NORMAL:
+                ApplyRowSizeMode(RowSizeMode::Normal);
+                return 0;
+            case IDM_SETTINGS_SIZE_LARGE:
+                ApplyRowSizeMode(RowSizeMode::Large);
+                return 0;
+            case IDM_SORT_NAME_ASC:
+                g_appSortColumn = AppSortColumn::Name;
+                g_appSortAscending = true;
+                SortApplications();
+                PopulateMainListView();
+                if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                return 0;
+            case IDM_SORT_NAME_DESC:
+                g_appSortColumn = AppSortColumn::Name;
+                g_appSortAscending = false;
+                SortApplications();
+                PopulateMainListView();
+                if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                return 0;
+            case IDM_SORT_SIZE_DESC:
+                g_appSortColumn = AppSortColumn::Size;
+                g_appSortAscending = false;
+                SortApplications();
+                PopulateMainListView();
+                if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                return 0;
+            case IDM_SORT_SIZE_ASC:
+                g_appSortColumn = AppSortColumn::Size;
+                g_appSortAscending = true;
+                SortApplications();
+                PopulateMainListView();
+                if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                return 0;
+            case IDM_SORT_DATE_DESC:
+                g_appSortColumn = AppSortColumn::Date;
+                g_appSortAscending = false;
+                SortApplications();
+                PopulateMainListView();
+                if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                return 0;
+            case IDM_SORT_DATE_ASC:
+                g_appSortColumn = AppSortColumn::Date;
+                g_appSortAscending = true;
+                SortApplications();
+                PopulateMainListView();
+                if (g_hHeader) InvalidateRect(g_hHeader, nullptr, FALSE);
+                if (g_hListView) InvalidateRect(g_hListView, nullptr, FALSE);
+                return 0;
+            case IDM_HELP_CHECK_UPDATES:
+                Updater::CheckForUpdates(hWnd);
+                return 0;
             case IDM_HELP_ABOUT:
-                MessageBoxW(hWnd, L"Zero 0.0.1-beta (Portable)\n\nFast, lightweight standalone uninstaller and leftover cleaner.\nNative C++ Win32.",
+                MessageBoxW(hWnd, L"Zero 0.0.2-beta (Portable)\n\nFast, lightweight standalone uninstaller and leftover cleaner.\nNative C++ Win32.",
                             L"About Zero", MB_OK | MB_ICONINFORMATION);
                 return 0;
             }
@@ -2180,8 +2910,12 @@ namespace {
                 OpenTopMenu(3);
                 return 0;
             }
-            if (wParam == 'H' || wParam == 'h') {
+            if (wParam == 'S' || wParam == 's') {
                 OpenTopMenu(4);
+                return 0;
+            }
+            if (wParam == 'H' || wParam == 'h') {
+                OpenTopMenu(5);
                 return 0;
             }
             if (wParam == VK_F10) {
@@ -2193,6 +2927,13 @@ namespace {
 
         case WM_KEYDOWN: {
             if (GetKeyState(VK_CONTROL) & 0x8000) {
+                if (wParam == 'F' || wParam == 'f') {
+                    if (g_hEditSearch) {
+                        SetFocus(g_hEditSearch);
+                        SendMessage(g_hEditSearch, EM_SETSEL, 0, -1);
+                    }
+                    return 0;
+                }
                 if (wParam == 'R' || wParam == 'r') {
                     if (g_currentViewMode == AppViewMode::Processes) {
                         ReloadProcesses();
@@ -2246,6 +2987,7 @@ namespace {
         }
 
         case WM_DESTROY:
+            ReleaseCustomMenuHook();
             KillTimer(hWnd, IDT_PROCESS_REFRESH_TIMER);
             if (g_hFont) DeleteObject(g_hFont);
             if (g_hFontBold) DeleteObject(g_hFontBold);
@@ -2278,12 +3020,32 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     icex.dwICC = ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES;
     InitCommonControlsEx(&icex);
 
+    SetCustomMenuHook();
+
+    LoadSettings();
+    if (!g_isDarkMode) {
+        CLR_BG_EVEN        = RGB(255, 255, 255);
+        CLR_BG_ODD         = RGB(246, 248, 250);
+        CLR_BG_SELECTED    = RGB(0, 120, 215);
+        CLR_TEXT_NORMAL    = RGB(32, 32, 32);
+        CLR_TEXT_SELECTED  = RGB(255, 255, 255);
+        CLR_TEXT_MUTED     = RGB(115, 115, 115);
+        CLR_HEADER_BG      = RGB(242, 244, 247);
+        CLR_HEADER_TEXT    = RGB(60, 60, 60);
+        CLR_BOTTOM_BG      = RGB(242, 244, 247);
+        CLR_BOTTOM_BORDER  = RGB(218, 221, 226);
+        CLR_EDIT_BG        = RGB(255, 255, 255);
+    }
+
     const wchar_t* MAIN_CLASS = L"ZeroGeekMainClass";
 
     WNDCLASSEXW wc = { sizeof(wc) };
     wc.lpfnWndProc = MainWndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = MAIN_CLASS;
+    wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    wc.hIconSm = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+                                   GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = CreateSolidBrush(CLR_BG_EVEN);
 
@@ -2305,7 +3067,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     g_hWndMain = CreateWindowExW(
         0,
         MAIN_CLASS,
-        L"Zero 0.0.1-beta",
+        L"Zero 0.0.2-beta",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         posX, posY, initWidth, initHeight,
         nullptr, nullptr, hInstance, nullptr
@@ -2315,6 +3077,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
         return 1;
     }
 
+    HICON hBigIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    HICON hSmallIcon = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+                                         GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    if (hBigIcon) SendMessage(g_hWndMain, WM_SETICON, ICON_BIG, (LPARAM)hBigIcon);
+    if (hSmallIcon) SendMessage(g_hWndMain, WM_SETICON, ICON_SMALL, (LPARAM)hSmallIcon);
+
     ShowWindow(g_hWndMain, nCmdShow);
     UpdateWindow(g_hWndMain);
 
@@ -2322,6 +3090,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
     while (GetMessageW(&msg, nullptr, 0, 0)) {
         if (msg.message == WM_KEYDOWN) {
             bool ctrlPressed = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+            if (ctrlPressed && (msg.wParam == 'F' || msg.wParam == 'f')) {
+                if (g_hEditSearch) {
+                    SetFocus(g_hEditSearch);
+                    SendMessage(g_hEditSearch, EM_SETSEL, 0, -1);
+                }
+                continue;
+            }
             if (ctrlPressed && (msg.wParam == 'R' || msg.wParam == 'r')) {
                 if (g_currentViewMode == AppViewMode::Processes) {
                     ReloadProcesses();

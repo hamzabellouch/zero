@@ -41,8 +41,8 @@ Zero requests or requires specific operating system privileges strictly to deliv
 - **Scope:** Restricted strictly to user application directories and registry nodes; protected operating system directories and critical hives are actively excluded.
 
 **D. Zero Outbound Network Connectivity Policy**
-- **Purpose:** Zero does not connect to the internet, contains no network sockets for communication, and performs no background telemetry updates.
-- **Scope:** Operates 100% offline.
+- **Purpose:** Zero operates completely offline for all software scanning, residual cleaning, and process monitoring features. It contains no background telemetry, analytics services, or silent network trackers.
+- **Scope & User-Initiated Update Check:** Network access is invoked strictly on explicit user demand when clicking "Check for Updates..." to query the public GitHub API (`api.github.com/repos/hamzabellouch/zero/releases/latest`) and download official binary assets. Zero transmits zero personal identifiers, device telemetry, IP logs, or installed software inventories.
 
 
 ### 4. Cleaning & Process Termination Safety Policy:
@@ -125,8 +125,8 @@ Email: hamzabellouchcontact@gmail.com
 * **النطاق:** مقتصر بشكل صارم على مجلدات التطبيقات ومفاتيح الريجستري المرتبطة بها؛ مع استبعاد ملفات ومجلدات نظام التشغيل المحمية تلقائياً.
 
 **د. سياسة انعدام الاتصال بالشبكة (Zero Network Connectivity)**
-* **الغرض:** لا يتصل Zero بشبكة الإنترنت، ولا يحتوي على بروتوكولات اتصال أو برمجيات إرسال قياسات تتبع خارجية.
-* **النطاق:** يعمل بشكل غير متصل بالإنترنت بنسبة ١٠٠٪.
+* **الغرض:** يعمل Zero بشكل غير متصل بالإنترنت بنسبة ١٠٠٪ لجميع ميزات فحص البرامج وتنظيف المخلفات ومراقبة العمليات. ولا يحتوي على أي خدمات تتبع أو تحليلات مخفية في الخلفية.
+* **النطاق وفحص التحديثات اليدوي:** يتم طلب الوصول إلى الإنترنت حصرياً وفقط عندما يضغط المستخدم يدوياً وبإرادته على خيار "Check for Updates..." للتحقق من واجهة برمجة GitHub العامة (`api.github.com/repos/hamzabellouch/zero/releases/latest`) أو تحميل التحديث الرسمي. لا يقوم Zero بجمع أو إرسال أي معرّفات للجهاز أو بيانات شخصية أو قوائم بالبرامج المثبتة إطلاقاً.
 
 
 ### ٤. سياسة أمان التنظيف وإنهاء العمليات:

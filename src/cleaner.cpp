@@ -731,6 +731,64 @@ namespace {
         int res = SHFileOperationW(&fileOp);
         return (res == 0 && !fileOp.fAnyOperationsAborted);
     }
+
+    bool RunCommandHidden(const std::wstring& cmd, DWORD timeoutMs = 15000) {
+        STARTUPINFOW si = { sizeof(si) };
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = { 0 };
+
+        std::vector<wchar_t> cmdBuf(cmd.length() + 1, 0);
+        wcsncpy_s(cmdBuf.data(), cmdBuf.size(), cmd.c_str(), cmd.length());
+
+        if (!CreateProcessW(nullptr, cmdBuf.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            return false;
+        }
+
+        WaitForSingleObject(pi.hProcess, timeoutMs);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return (exitCode == 0);
+    }
+
+    bool DeleteFolderWithPrivileges(const std::wstring& path) {
+        std::wstring takeown = L"takeown.exe /f \"" + path + L"\" /r /d y";
+        RunCommandHidden(takeown, 12000);
+
+        std::wstring icacls = L"icacls.exe \"" + path + L"\" /grant *S-1-5-32-544:F /t /c /q";
+        RunCommandHidden(icacls, 12000);
+
+        SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+        std::error_code ec;
+        fs::remove_all(path, ec);
+        return !fs::exists(path, ec);
+    }
+
+    bool DeleteWindowsAppsPackageFolder(const std::wstring& folderPath) {
+        // 1. Extract package identifier / base name
+        size_t lastSlash = folderPath.find_last_of(L"\\/");
+        std::wstring pkgFolder = (lastSlash != std::wstring::npos) ? folderPath.substr(lastSlash + 1) : folderPath;
+
+        size_t under = pkgFolder.find(L'_');
+        std::wstring pkgName = (under != std::wstring::npos) ? pkgFolder.substr(0, under) : pkgFolder;
+
+        // 2. Run PowerShell AppX package and provisioned package removal
+        std::wstring psCmd = L"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \""
+            L"Get-AppxPackage -AllUsers '*" + pkgName + L"*' | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue; "
+            L"Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like '*" + pkgName + L"*' -or $_.PackageName -like '*" + pkgName + L"*' } | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue"
+            L"\"";
+        RunCommandHidden(psCmd, 35000);
+
+        // 3. If folder still exists on disk, take ownership and remove it
+        std::error_code ec;
+        if (fs::exists(folderPath, ec)) {
+            DeleteFolderWithPrivileges(folderPath);
+        }
+
+        return !fs::exists(folderPath, ec);
+    }
 }
 
 bool Cleaner::DeleteSelectedItems(std::vector<LeftoverItem>& items, std::vector<std::wstring>& errors) {
@@ -743,6 +801,20 @@ bool Cleaner::DeleteSelectedItems(std::vector<LeftoverItem>& items, std::vector<
             std::error_code ec;
             if (!fs::exists(item.fullPath, ec)) {
                 continue; // Already removed
+            }
+
+            // Check if this is a WindowsApps directory
+            std::wstring lowerPath = item.fullPath;
+            std::transform(lowerPath.begin(), lowerPath.end(), lowerPath.begin(), ::towlower);
+            bool isWinApps = (lowerPath.find(L"\\windowsapps\\") != std::wstring::npos) ||
+                             (item.displayType == L"WindowsApps Package");
+
+            if (isWinApps && item.type == LeftoverType::Folder) {
+                if (!DeleteWindowsAppsPackageFolder(item.fullPath)) {
+                    errors.push_back(L"Failed to delete WindowsApps package folder: " + item.fullPath);
+                    allSuccess = false;
+                }
+                continue;
             }
 
             // Remove read-only attribute if set
@@ -758,8 +830,16 @@ bool Cleaner::DeleteSelectedItems(std::vector<LeftoverItem>& items, std::vector<
                 }
 
                 if (ec) {
-                    errors.push_back(L"Failed to delete file/folder: " + item.fullPath + L" (" + std::to_wstring(ec.value()) + L")");
-                    allSuccess = false;
+                    // Try elevated takeown fallback if access denied (Error 5)
+                    bool recovered = false;
+                    if (ec.value() == 5 && item.type == LeftoverType::Folder) {
+                        recovered = DeleteFolderWithPrivileges(item.fullPath);
+                    }
+
+                    if (!recovered) {
+                        errors.push_back(L"Failed to delete file/folder: " + item.fullPath + L" (" + std::to_wstring(ec.value()) + L")");
+                        allSuccess = false;
+                    }
                 }
             }
         } else if (item.type == LeftoverType::RegistryKey) {

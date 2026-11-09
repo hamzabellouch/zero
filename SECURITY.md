@@ -6,8 +6,8 @@ The following versions of Zero are currently supported with security, stability,
 
 | Version       | Supported          |
 | ------------- | ------------------ |
-| + 0.0.1       | :white_check_mark: |
-| < 0.0.1       | :x:                |
+| + 0.0.2       | :white_check_mark: |
+| < 0.0.2       | :x:                |
 
 
 
@@ -55,3 +55,5 @@ Zero is designed with a strict **Privacy-First & On-Device Security Model**:
 - **System Directory Isolation:** Zero actively prevents scanning or deleting core operating system paths (`Windows`, `System32`, `Microsoft`, etc.) and protected registry hives via hardcoded safety safeguards.
 - **Controlled Privilege Model:** Zero operates safely under standard user permissions for user-level software and requests administrative elevation only when removing system-wide software or protected registry keys.
 - **Transient Memory Handling:** All process snapshots, resource counters, and leftover scan lists are maintained solely in volatile memory (RAM) and are immediately discarded upon dialog closure or exit, keeping system footprint minimal and secure.
+- **On-Demand Secure Updates:** Checking for updates connects exclusively to the official public GitHub Releases API (`api.github.com/repos/hamzabellouch/zero/releases/latest`) over encrypted HTTPS using native Windows `WinINet`. It transmits zero user telemetry, analytics, cookies, or device identifiers. In-place updates are performed safely through verified release asset downloads and isolated atomic executable swapping.
+- **Targeted WindowsApps Residual Remediation:** When removing leftover WindowsApps package folders, Zero targets strictly the verified, isolated package directory via granular security identifier (SID) permissions, preventing permission leakage to sibling system directories.

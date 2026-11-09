@@ -67,7 +67,7 @@ namespace ZeroCore {
                             std::string caskName = entry.path().filename().string();
                             AppInfo info;
                             info.id = caskName;
-                            info.displayName = std::wstring(caskName.begin(), caskName.end());
+                            info.displayName = Utf8ToWstring(caskName);
                             info.publisher = L"Homebrew Cask";
                             info.type = AppType::SystemPackage;
                             packages.push_back(info);
@@ -127,12 +127,12 @@ namespace ZeroCore {
             std::string appName = appBundlePath.stem().string();
 
             outInfo.id = appName;
-            outInfo.displayName = std::wstring(appName.begin(), appName.end());
+            outInfo.displayName = Utf8ToWstring(appName);
             std::string pStr = appBundlePath.string();
-            outInfo.installLocation = std::wstring(pStr.begin(), pStr.end());
+            outInfo.installLocation = Utf8ToWstring(pStr);
             outInfo.type = AppType::Desktop;
 
-            // Simple XML property list parser for CFBundleName / CFBundleShortVersionString
+            // Simple XML property list parser for CFBundleDisplayName / CFBundleName / CFBundleShortVersionString
             if (fs::exists(plistPath)) {
                 std::ifstream f(plistPath);
                 std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -149,13 +149,18 @@ namespace ZeroCore {
                     return "";
                 };
 
-                std::string bName = extractKey("CFBundleName");
-                if (!bName.empty()) {
-                    outInfo.displayName = std::wstring(bName.begin(), bName.end());
+                std::string bDisp = extractKey("CFBundleDisplayName");
+                if (!bDisp.empty()) {
+                    outInfo.displayName = Utf8ToWstring(bDisp);
+                } else {
+                    std::string bName = extractKey("CFBundleName");
+                    if (!bName.empty()) {
+                        outInfo.displayName = Utf8ToWstring(bName);
+                    }
                 }
                 std::string ver = extractKey("CFBundleShortVersionString");
                 if (!ver.empty()) {
-                    outInfo.version = std::wstring(ver.begin(), ver.end());
+                    outInfo.version = Utf8ToWstring(ver);
                 }
             }
 

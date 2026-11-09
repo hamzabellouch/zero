@@ -148,7 +148,13 @@ void AppManager::ScanRegistryNode(HKEY hRoot, const std::wstring& path, REGSAM s
                 app.installLocation = ReadRegString(hAppKey, L"InstallLocation");
                 app.uninstallString = ReadRegString(hAppKey, L"UninstallString");
                 app.quietUninstallString = ReadRegString(hAppKey, L"QuietUninstallString");
-                app.installDate = FormatDate(ReadRegString(hAppKey, L"InstallDate"));
+                std::wstring rawDate = ReadRegString(hAppKey, L"InstallDate");
+                app.installDate = FormatDate(rawDate);
+                if (rawDate.length() >= 8 && iswdigit(rawDate[0]) && iswdigit(rawDate[4])) {
+                    try {
+                        app.installDateSortKey = std::stoull(rawDate.substr(0, 8));
+                    } catch (...) {}
+                }
                 app.displayIcon = ReadRegString(hAppKey, L"DisplayIcon");
 
                 DWORD estKB = ReadRegDword(hAppKey, L"EstimatedSize", 0);
@@ -174,6 +180,24 @@ void AppManager::ScanRegistryNode(HKEY hRoot, const std::wstring& path, REGSAM s
                 // Trim trailing backslash from installLocation
                 while (!app.installLocation.empty() && (app.installLocation.back() == L'\\' || app.installLocation.back() == L'/')) {
                     app.installLocation.pop_back();
+                }
+
+                // If install date is missing from registry, try folder creation time
+                if (app.installDateSortKey == 0 && !app.installLocation.empty()) {
+                    WIN32_FILE_ATTRIBUTE_DATA fad;
+                    if (GetFileAttributesExW(app.installLocation.c_str(), GetFileExInfoStandard, &fad)) {
+                        SYSTEMTIME st;
+                        if (FileTimeToSystemTime(&fad.ftCreationTime, &st)) {
+                            if (st.wYear >= 1990 && st.wYear <= 2100) {
+                                wchar_t dateBuf[64] = { 0 };
+                                GetDateFormatW(LOCALE_USER_DEFAULT, 0, &st, L"MMM dd, yyyy", dateBuf, 64);
+                                app.installDate = dateBuf;
+                                app.installDateSortKey = static_cast<uint64_t>(st.wYear) * 10000ULL +
+                                                         static_cast<uint64_t>(st.wMonth) * 100ULL +
+                                                         static_cast<uint64_t>(st.wDay);
+                            }
+                        }
+                    }
                 }
 
                 // Deduplication check
@@ -300,7 +324,7 @@ std::vector<InstalledApp> AppManager::EnumerateStoreApps() {
             } else {
                 // Try reading AppxManifest.xml
                 std::wstring manifestPath = rootFolder + L"\\AppxManifest.xml";
-                std::wifstream mFile(manifestPath);
+                std::wifstream mFile(manifestPath.c_str());
                 bool foundManifestName = false;
                 if (mFile.is_open()) {
                     std::wstring line;
@@ -365,6 +389,9 @@ std::vector<InstalledApp> AppManager::EnumerateStoreApps() {
             wchar_t dateBuf[64] = { 0 };
             GetDateFormatW(LOCALE_USER_DEFAULT, 0, &st, L"MMM dd, yyyy", dateBuf, 64);
             app.installDate = dateBuf;
+            app.installDateSortKey = static_cast<uint64_t>(st.wYear) * 10000ULL +
+                                     static_cast<uint64_t>(st.wMonth) * 100ULL +
+                                     static_cast<uint64_t>(st.wDay);
         }
 
         // Calculate size from PackageRootFolder
@@ -493,7 +520,10 @@ bool AppManager::UninstallStoreApp(const InstalledApp& app, std::wstring& errorM
         return false;
     }
 
-    std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"Remove-AppxPackage -Package '" + app.packageFullName + L"'\"";
+    std::wstring cmd = L"powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \""
+                       L"Get-AppxPackage -AllUsers -Package '" + app.packageFullName + L"' | Remove-AppxPackage -AllUsers -ErrorAction SilentlyContinue; "
+                       L"Get-AppxProvisionedPackage -Online | Where-Object { $_.PackageName -like '*" + app.packageFullName + L"*' -or $_.DisplayName -like '*" + app.displayName + L"*' } | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue"
+                       L"\"";
 
     STARTUPINFOW si = { sizeof(si) };
     si.dwFlags = STARTF_USESHOWWINDOW;

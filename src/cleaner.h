@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <cstdint>
 #include "app_manager.h"
 
 enum class LeftoverType {

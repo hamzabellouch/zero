@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-project(Zero VERSION 0.0.1 LANGUAGES CXX)
+project(Zero VERSION 0.0.2 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ==============================================================================
@@ -30,10 +30,11 @@ if(WIN32)
         src/process_manager.cpp
         src/ui_scan_dlg.cpp
         src/ui_leftovers_dlg.cpp
+        src/updater.cpp
         src/app.rc
     )
     target_link_libraries(Zero PRIVATE
-        comctl32 comdlg32 shell32 shlwapi ole32 dwmapi uxtheme gdiplus psapi version iphlpapi ws2_32
+        comctl32 comdlg32 shell32 shlwapi ole32 dwmapi uxtheme gdiplus psapi version iphlpapi wininet ws2_32
     )
     if(MSVC)
         target_compile_options(Zero PRIVATE /MT /W3 /O2 /permissive-)
@@ -94,7 +95,7 @@ if(Qt6_FOUND OR Qt5_FOUND)
                 MACOSX_BUNDLE TRUE
                 MACOSX_BUNDLE_BUNDLE_NAME "Zero"
                 MACOSX_BUNDLE_BUNDLE_IDENTIFIER "com.zero.uninstaller"
-                MACOSX_BUNDLE_SHORT_VERSION_STRING "0.0.1"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "0.0.2"
             )
         elseif(UNIX)
             set_target_properties(Zero-CrossPlatform PROPERTIES
@@ -114,7 +115,7 @@ endif()
 # ==============================================================================
 set(CPACK_PACKAGE_NAME "Zero")
 set(CPACK_PACKAGE_VENDOR "Zero")
-set(CPACK_PACKAGE_VERSION "0.0.1")
+set(CPACK_PACKAGE_VERSION "0.0.2")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Fast, lightweight standalone uninstaller and leftover cleaner.")
 
 if(APPLE)

@@ -1,6 +1,9 @@
 #include <windows.h>
 #include "resource.h"
 
+// Application Icon
+IDI_APP_ICON ICON "app.ico"
+
 // RT_MANIFEST is type 24
 1 24 "app.manifest"
 
@@ -25,7 +28,7 @@ BEGIN
             VALUE "LegalCopyright", "Copyright (C) 2026 Zero Project. All rights reserved.\0"
             VALUE "OriginalFilename", "Zero.exe\0"
             VALUE "ProductName", "Zero\0"
-            VALUE "ProductVersion", "1.0.0.0\0"
+            VALUE "ProductVersion", "0.0.2-beta\0"
         END
     END
     BLOCK "VarFileInfo"

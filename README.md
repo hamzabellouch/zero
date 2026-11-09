@@ -15,7 +15,7 @@ Cleanly uninstall desktop and store applications, eradicate leftover files and r
 
 Unlike traditional utilities that bundle intrusive advertisements, background telemetry services, or heavy installer packages, Zero operates **100% on-device** and offline without collecting or transmitting any personal information or telemetry data. On Windows, it runs as a pure standalone native executable compiled with a static C++ runtime (`/MT`), launching in under 100 milliseconds with an ultra-low memory footprint under 10 MB. On Linux and macOS, Zero delivers the same powerful scanning and management capabilities through a unified, native Qt6 interface.
 
-Zero is built following modern C++17 standards, featuring an intelligent **Sibling Application Protection** engine that protects shared vendor components during leftover cleanup, safe **Recycle Bin integration** for recoverable file deletions, and a responsive dark user interface with Per-Monitor High-DPI scaling.
+Zero is built following modern C++20 standards, featuring an intelligent **Sibling Application Protection** engine that protects shared vendor components during leftover cleanup, safe **Recycle Bin integration** for recoverable file deletions, an in-place auto-updater via GitHub releases, and a responsive Midnight Navy dark user interface with Per-Monitor High-DPI scaling.
 
 
 
@@ -57,9 +57,12 @@ Zero UI & Features:
 | **Real-Time Task & Process Engine** | `ProcessManager::UpdateSnapshot`, `PSAPI` & `Toolhelp32` | **Real-Time** (1 Hz refresh) | **100% Local** | Monitors active processes with per-process and system-wide CPU utilization %, RAM working set, disk I/O throughput (B/s), and network traffic rate. |
 | **Process Instance Grouping & Tree Kill** | `ProcessManager::TerminateProcessGroup` & Win32 Process APIs | **Instant** (< 50 ms) | **Controlled** | Groups multi-process software (browsers, Electron runtimes) into single aggregated rows and provides one-click termination of full process trees. |
 | **High-Performance Search & Filter** | Instant Substring Token Filter & Owner-Drawn Lists | **Zero Latency** (Instant) | **100% On-Device** | Filters hundreds of installed programs and processes instantly on keystroke with custom owner-drawn capsule controls and zero UI stutter. |
-| **Portable Zero-Footprint Standalone Binary** | Statically linked MSVC (`/MT`), Single `.exe` (< 5 MB) | **Blazing Fast** (< 100 ms launch) | **Zero System Footprint** | Requires no installation wizard, no external DLL dependencies, no background services, and writes zero configuration clutter to the host system. |
-| **Modern Dark Theme & High-DPI UI** | Double-buffered GDI+ / Win32 Custom Draw & Qt6 Palette | **Smooth 60+ FPS** | **N/A** | Features an elegant dark visual aesthetic (`#191919` / `#212121` with `#E0562E` vivid coral accents) and dynamic Per-Monitor High-DPI (v2) scaling. |
+| **Portable Zero-Footprint Standalone Binary** | Statically linked MSVC (`/MT`) or GCC (`-static`), Single `.exe` (< 5 MB) | **Blazing Fast** (< 100 ms launch) | **Zero System Footprint** | Requires no installation wizard, no external DLL dependencies, no background services, and writes zero configuration clutter to the host system. |
+| **Check for Updates & In-Place Auto-Update** | Native `WinINet` HTTPS & GitHub Releases API (`hamzabellouch/zero`) | **Instant** (< 1 sec) | **100% On-Demand / Privacy-Safe** | Checks GitHub releases on demand with zero background telemetry, compares SemVer tags, and seamlessly updates the portable binary in-place without manual file downloads. |
+| **WindowsApps (UWP) Residual Eraser** | PowerShell AppX + Targeted Ownership & ACL Engine | **Rapid** (< 2 sec) | **100% Local / Safe** | Safely unregisters AppX/MSIX packages and eradicates stubbornly locked package folders in `C:\Program Files\WindowsApps`, preventing Access Denied (Error 5) errors. |
+| **Modern Midnight Navy Theme & High-DPI UI** | Double-buffered GDI+ / Win32 Custom Draw & Qt6 Palette | **Smooth 60+ FPS** | **N/A** | Features an elegant Midnight Navy aesthetic (`#141A24` background, `#1A212D` title bar, `#283548` soft borders, `#0078D7` blue accents) with anti-aliased capsule pill buttons. |
 | **Cross-Platform Architecture (Linux & macOS)** | Modern Qt6 GUI with native platform engines (`/proc`, `libproc`) | **Native Speed** | **100% Local** | Seamlessly extends application discovery, deep cleaning, and real-time process monitoring across Linux distributions and macOS environments. |
+| **Data Export (HTML & CSV)** | Native Report Generator Engine | **Instant** (< 50 ms) | **100% Local** | Exports full installed application lists and process inventory snapshots into clean HTML and CSV tables for auditing and documentation. |
 | **Zero Telemetry / 100% Privacy** | Pure Local Code, No Network Sockets, No Trackers | **N/A** | **Complete Privacy** | Zero analytics SDKs, zero crash report collectors, zero advertising frameworks, and zero outbound network transmission. |
 
 
@@ -74,8 +77,8 @@ Zero follows clean architecture principles for maximum execution speed, safety, 
   - High-throughput differential sampling for real-time CPU percentages, memory working sets, and disk/network I/O transfer rates
 
 * **Language & Build Tooling:**
-  - `100% Modern C++17` (`/std:c++17`) with strict type safety, RAII memory management, and zero garbage collection overhead
-  - Windows: `Microsoft Visual C++ (MSVC 2022)` with `/MT` (Multi-threaded Static CRT) and `/O2` maximum speed optimizations for a standalone zero-dependency executable
+  - `100% Modern C++20` (`/std:c++20` / `-std=c++20`) with strict type safety, RAII memory management, and zero garbage collection overhead
+  - Windows: Dual-toolchain support via `build.bat` using `Microsoft Visual C++ (MSVC 2022)` (`/MT`) or `GCC / MinGW (w64devkit)` (`-static`) with `/O2` maximum speed optimizations for a standalone zero-dependency executable
   - Linux & macOS: `CMake 3.16+` cross-platform build orchestration with automated `CPack` distribution packaging (TGZ, DEB, RPM, DMG, DragNDrop)
 
 * **UI Framework & Design System:**
@@ -109,7 +112,7 @@ Zero follows clean architecture principles for maximum execution speed, safety, 
 ## 🔨 Building from Source
 
 ### Windows (Native Standalone Executable)
-To build the standalone Windows binary, make sure you have Visual Studio 2022 with C++ Desktop Development tools installed:
+To build the standalone Windows binary, make sure you have Visual Studio 2022 (MSVC) or GCC / MinGW (w64devkit) installed:
 
 1. Clone the repository: `git clone https://github.com/hamzabellouch/zero.git`
 2. Open a standard terminal or Developer Command Prompt for Visual Studio.

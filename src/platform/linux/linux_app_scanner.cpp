@@ -80,8 +80,8 @@ namespace ZeroCore {
                             ss >> ver;
                             AppInfo info;
                             info.id = id;
-                            info.displayName = std::wstring(name.begin(), name.end());
-                            info.version = std::wstring(ver.begin(), ver.end());
+                            info.displayName = Utf8ToWstring(name);
+                            info.version = Utf8ToWstring(ver);
                             info.publisher = L"Flatpak";
                             info.type = AppType::Sandboxed;
                             packages.push_back(info);
@@ -106,8 +106,8 @@ namespace ZeroCore {
                             if (name == "core" || name == "snapd" || name == "bare") continue;
                             AppInfo info;
                             info.id = name;
-                            info.displayName = std::wstring(name.begin(), name.end());
-                            info.version = std::wstring(ver.begin(), ver.end());
+                            info.displayName = Utf8ToWstring(name);
+                            info.version = Utf8ToWstring(ver);
                             info.publisher = L"Snap";
                             info.type = AppType::Sandboxed;
                             packages.push_back(info);
@@ -190,10 +190,10 @@ namespace ZeroCore {
             if (noDisplay == "true" || name.empty()) return false;
 
             outInfo.id = fs::path(path).stem().string();
-            outInfo.displayName = std::wstring(name.begin(), name.end());
-            outInfo.version = std::wstring(version.begin(), version.end());
-            outInfo.iconPath = std::wstring(icon.begin(), icon.end());
-            outInfo.installLocation = std::wstring(path.begin(), path.end());
+            outInfo.displayName = Utf8ToWstring(name);
+            outInfo.version = Utf8ToWstring(version);
+            outInfo.iconPath = Utf8ToWstring(icon);
+            outInfo.installLocation = Utf8ToWstring(path);
             outInfo.type = AppType::Desktop;
             return true;
         }

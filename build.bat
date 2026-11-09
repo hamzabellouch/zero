@@ -31,7 +31,13 @@ if "!VS_VCVARS!"=="" (
 )
 
 if "!VS_VCVARS!"=="" (
-    echo [ERROR] Could not find vcvars64.bat. Please run from Developer Command Prompt for VS.
+    if exist "E:\Dev\w64devkit\bin\g++.exe" set "PATH=E:\Dev\w64devkit\bin;!PATH!"
+    where g++.exe >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [1/3] GCC / MinGW environment detected in PATH.
+        goto :compile_gcc
+    )
+    echo [ERROR] Could not find vcvars64.bat or g++.exe. Please run from Developer Command Prompt or install BuildTools.
     exit /b 1
 )
 
@@ -46,6 +52,10 @@ if errorlevel 1 (
 
 if not exist "bin" mkdir "bin"
 if not exist "build" mkdir "build"
+if exist "bin\Zero.exe" (
+    del /f /q "bin\Zero.old" >nul 2>&1
+    ren "bin\Zero.exe" "Zero.old" >nul 2>&1
+)
 
 echo [2/3] Compiling Application Resources and Manifest...
 cd src
@@ -58,14 +68,50 @@ if errorlevel 1 (
 cd ..
 
 echo [3/3] Compiling and Linking C++ Sources (Optimized /MT Standalone)...
-cl.exe /nologo /O2 /W3 /MT /std:c++17 /EHsc /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /GS /guard:cf /Gy ^
+cl.exe /nologo /O2 /W3 /MT /std:c++20 /EHsc /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /GS /guard:cf /Gy ^
     /Fo"build\\" ^
     /Fe"bin\Zero.exe" ^
-    src\main.cpp src\app_manager.cpp src\cleaner.cpp src\ui_leftovers_dlg.cpp src\ui_scan_dlg.cpp src\process_manager.cpp ^
+    src\main.cpp src\app_manager.cpp src\cleaner.cpp src\ui_leftovers_dlg.cpp src\ui_scan_dlg.cpp src\process_manager.cpp src\updater.cpp ^
     build\app.res ^
     /link /SUBSYSTEM:WINDOWS /MACHINE:X64 ^
     /DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /OPT:REF /OPT:ICF /GUARD:CF ^
-    user32.lib gdi32.lib gdiplus.lib comctl32.lib comdlg32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib dwmapi.lib uxtheme.lib psapi.lib version.lib iphlpapi.lib
+    user32.lib gdi32.lib gdiplus.lib comctl32.lib comdlg32.lib shell32.lib shlwapi.lib advapi32.lib ole32.lib dwmapi.lib uxtheme.lib psapi.lib version.lib iphlpapi.lib wininet.lib
+
+if errorlevel 1 (
+    echo [ERROR] Compilation failed.
+    exit /b 1
+)
+
+echo.
+echo ===================================================
+echo   BUILD SUCCESSFUL!
+echo   Executable generated at: bin\Zero.exe
+echo ===================================================
+dir "bin\Zero.exe"
+
+exit /b 0
+
+:compile_gcc
+if not exist "bin" mkdir "bin"
+if not exist "build" mkdir "build"
+if exist "bin\Zero.exe" (
+    del /f /q "bin\Zero.old" >nul 2>&1
+    ren "bin\Zero.exe" "Zero.old" >nul 2>&1
+)
+
+echo [2/3] Compiling Application Resources with windres...
+windres.exe -I src -i src/app.rc -o build/app.res.o -O coff
+if errorlevel 1 (
+    echo [ERROR] Resource compilation failed.
+    exit /b 1
+)
+
+echo [3/3] Compiling and Linking C++ Sources with GCC (Optimized / Static Standalone)...
+g++.exe -std=c++20 -O2 -mwindows -municode -static -DUNICODE -D_UNICODE -DWIN32_LEAN_AND_MEAN ^
+    -o "bin\Zero.exe" ^
+    src\main.cpp src\app_manager.cpp src\cleaner.cpp src\ui_leftovers_dlg.cpp src\ui_scan_dlg.cpp src\process_manager.cpp src\updater.cpp ^
+    build\app.res.o ^
+    -lcomctl32 -lcomdlg32 -lshell32 -lshlwapi -ladvapi32 -lole32 -ldwmapi -luxtheme -lgdiplus -lpsapi -lversion -liphlpapi -lwininet -lws2_32 -loleaut32 -luuid -lgdi32 -luser32
 
 if errorlevel 1 (
     echo [ERROR] Compilation failed.

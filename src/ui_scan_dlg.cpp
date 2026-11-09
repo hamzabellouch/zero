@@ -1,6 +1,8 @@
 #include "ui_scan_dlg.h"
+#include "resource.h"
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <gdiplus.h>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -9,18 +11,19 @@
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "gdiplus.lib")
 
 namespace {
-    // Geek Uninstaller Dark Palette
-    const COLORREF CLR_BG          = RGB(25, 25, 25);     // #191919
-    const COLORREF CLR_TEXT_NORMAL = RGB(224, 224, 224);  // #E0E0E0
-    const COLORREF CLR_TEXT_MUTED  = RGB(140, 140, 140);  // #8C8C8C
-    const COLORREF CLR_ACCENT      = RGB(224, 86, 46);    // #E0562E Vivid Coral/Orange
-    const COLORREF CLR_BAR_BG      = RGB(38, 38, 38);     // #262626
-    const COLORREF CLR_BAR_BORDER  = RGB(60, 60, 60);     // #3C3C3C
-    const COLORREF CLR_BTN_BG      = RGB(38, 38, 38);     // #262626
-    const COLORREF CLR_BTN_BORDER  = RGB(60, 60, 60);     // #3C3C3C
-    const COLORREF CLR_BTN_PRESSED = RGB(26, 26, 26);     // #1A1A1A
+    // Midnight Navy Dark Palette (Matching main.cpp and #1A212D Title Bar)
+    const COLORREF CLR_BG          = RGB(20, 26, 36);     // #141A24 Deep Midnight Navy
+    const COLORREF CLR_TEXT_NORMAL = RGB(226, 232, 240);  // #E2E8F0 Clean Silver White
+    const COLORREF CLR_TEXT_MUTED  = RGB(141, 155, 176);  // #8D9BB0 Slate
+    const COLORREF CLR_ACCENT      = RGB(0, 120, 215);    // #0078D7 Windows Accent Blue
+    const COLORREF CLR_BAR_BG      = RGB(26, 33, 45);     // #1A212D
+    const COLORREF CLR_BAR_BORDER  = RGB(40, 53, 72);     // #283548
+    const COLORREF CLR_BTN_BG      = RGB(34, 44, 61);     // #222C3D
+    const COLORREF CLR_BTN_BORDER  = RGB(55, 70, 95);     // #37465F
+    const COLORREF CLR_BTN_PRESSED = RGB(20, 26, 36);     // #141A24
 
     const UINT WM_APP_PROGRESS_TICK  = WM_APP + 101;
     const UINT WM_APP_SCAN_COMPLETE  = WM_APP + 102;
@@ -105,6 +108,13 @@ namespace {
             BOOL darkMode = TRUE;
             DwmSetWindowAttribute(hWnd, 20, &darkMode, sizeof(darkMode));
             DwmSetWindowAttribute(hWnd, 19, &darkMode, sizeof(darkMode));
+
+            // Set Application Logo Icon in titlebar
+            HICON hBigIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON));
+            HICON hSmallIcon = (HICON)LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+                                                 GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            if (hBigIcon) SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hBigIcon);
+            if (hSmallIcon) SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hSmallIcon);
 
             UINT dpi = GetDlgDpi(hWnd);
             CreateScanFonts(ctx, dpi);
@@ -230,31 +240,43 @@ namespace {
                 HDC hdc = pDIS->hDC;
                 RECT rc = pDIS->rcItem;
                 bool isPressed = (pDIS->itemState & ODS_SELECTED) != 0;
-                bool isFocus = (pDIS->itemState & ODS_FOCUS) != 0;
 
-                COLORREF bgCol = isPressed ? CLR_BTN_PRESSED : CLR_BTN_BG;
-                COLORREF borderCol = isFocus ? CLR_ACCENT : CLR_BTN_BORDER;
+                // Fill background with dialog color so rounded capsule corners blend cleanly
+                HBRUSH hBrParent = CreateSolidBrush(CLR_BG);
+                FillRect(hdc, &rc, hBrParent);
+                DeleteObject(hBrParent);
 
-                HBRUSH hBr = CreateSolidBrush(bgCol);
-                HPEN hPen = CreatePen(PS_SOLID, 1, borderCol);
-                HBRUSH hOldBr = (HBRUSH)SelectObject(hdc, hBr);
-                HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+                // Anti-aliased Capsule Drawing with GDI+
+                Gdiplus::Graphics g(hdc);
+                g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-                RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 6, 6);
+                float x = (float)rc.left + 1.0f;
+                float y = (float)rc.top + 1.0f;
+                float w = (float)(rc.right - rc.left) - 2.0f;
+                float h = (float)(rc.bottom - rc.top) - 2.0f;
+                float r = h; // pill capsule radius = height
 
-                SelectObject(hdc, hOldBr);
-                SelectObject(hdc, hOldPen);
-                DeleteObject(hBr);
-                DeleteObject(hPen);
+                Gdiplus::GraphicsPath path;
+                path.AddArc(x, y, r, r, 90, 180);
+                path.AddArc(x + w - r, y, r, r, 270, 180);
+                path.CloseFigure();
+
+                Gdiplus::Color fillCol = isPressed ? Gdiplus::Color(255, 20, 26, 36) : Gdiplus::Color(255, 34, 44, 61);
+                Gdiplus::Color borderCol = Gdiplus::Color(255, 55, 70, 95);
+
+                Gdiplus::SolidBrush br(fillCol);
+                g.FillPath(&br, &path);
+
+                Gdiplus::Pen pen(borderCol, 1.2f);
+                g.DrawPath(&pen, &path);
+
+                wchar_t text[64] = { 0 };
+                GetWindowTextW(pDIS->hwndItem, text, 64);
 
                 SetBkMode(hdc, TRANSPARENT);
                 SetTextColor(hdc, CLR_TEXT_NORMAL);
                 HFONT hOldFont = (HFONT)SelectObject(hdc, ctx ? ctx->hFontNormal : GetStockObject(DEFAULT_GUI_FONT));
-
-                wchar_t text[64] = { 0 };
-                GetWindowTextW(pDIS->hwndItem, text, 64);
                 DrawTextW(hdc, text, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
                 SelectObject(hdc, hOldFont);
                 return TRUE;
             }

@@ -3,8 +3,39 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cstdlib>
+
+#if defined(_WIN32)
+    #include <wchar.h>
+#else
+    #include <cwchar>
+    #include <wctype.h>
+    #ifndef _wcsicmp
+    #define _wcsicmp wcscasecmp
+    #endif
+#endif
 
 namespace ZeroCore {
+
+    inline std::wstring Utf8ToWstring(const std::string& str) {
+        if (str.empty()) return L"";
+        std::vector<wchar_t> buf(str.size() + 1);
+        size_t outLen = mbstowcs(buf.data(), str.c_str(), str.size());
+        if (outLen != (size_t)-1) {
+            return std::wstring(buf.data(), outLen);
+        }
+        return std::wstring(str.begin(), str.end());
+    }
+
+    inline std::string WstringToUtf8(const std::wstring& wstr) {
+        if (wstr.empty()) return "";
+        std::vector<char> buf(wstr.size() * 4 + 1);
+        size_t outLen = wcstombs(buf.data(), wstr.c_str(), buf.size());
+        if (outLen != (size_t)-1) {
+            return std::string(buf.data(), outLen);
+        }
+        return std::string(wstr.begin(), wstr.end());
+    }
 
     enum class OSType {
         Windows,
@@ -24,6 +55,7 @@ namespace ZeroCore {
         std::wstring version;
         std::wstring publisher;
         std::wstring installDate;
+        uint64_t installDateSortKey = 0;
         std::wstring installLocation;
         uint64_t estimatedSizeBytes = 0;
         std::wstring sizeFormatted;

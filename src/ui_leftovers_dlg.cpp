@@ -3,29 +3,31 @@
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
+#include <gdiplus.h>
 #include <iomanip>
 #include <sstream>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "gdiplus.lib")
 
 namespace {
-    // Geek Uninstaller Dark Palette (Matching main.cpp exactly)
-    const COLORREF CLR_BG_EVEN        = RGB(25, 25, 25);     // #191919
-    const COLORREF CLR_BG_ODD         = RGB(33, 33, 33);     // #212121
-    const COLORREF CLR_BG_SELECTED    = RGB(224, 86, 46);    // #E0562E Vivid Coral/Orange
-    const COLORREF CLR_TEXT_NORMAL    = RGB(224, 224, 224);  // Light Gray
+    // Midnight Navy Dark Palette (Matching main.cpp and #1A212D Title Bar)
+    const COLORREF CLR_BG_EVEN        = RGB(20, 26, 36);     // #141A24 Deep Midnight Navy
+    const COLORREF CLR_BG_ODD         = RGB(28, 36, 51);     // #1C2433 Lighter Midnight Navy
+    const COLORREF CLR_BG_SELECTED    = RGB(0, 120, 215);    // #0078D7 Windows Accent Blue
+    const COLORREF CLR_TEXT_NORMAL    = RGB(226, 232, 240);  // #E2E8F0 Clean Silver White
     const COLORREF CLR_TEXT_SELECTED  = RGB(255, 255, 255);  // Pure White
-    const COLORREF CLR_TEXT_MUTED     = RGB(140, 140, 140);  // Dimmed Gray
-    const COLORREF CLR_HEADER_BG      = RGB(22, 22, 22);     // #161616
-    const COLORREF CLR_HEADER_TEXT    = RGB(200, 200, 200);  // #C8C8C8
-    const COLORREF CLR_BORDER         = RGB(45, 45, 45);     // #2D2D2D
-    const COLORREF CLR_BTN_BG         = RGB(38, 38, 38);     // #262626
-    const COLORREF CLR_BTN_BORDER     = RGB(60, 60, 60);     // #3C3C3C
-    const COLORREF CLR_BTN_PRESSED    = RGB(26, 26, 26);     // #1A1A1A
-    const COLORREF CLR_BTN_DEL_BG     = RGB(200, 50, 30);    // Crimson Coral for Delete
-    const COLORREF CLR_BTN_DEL_PRESS  = RGB(160, 35, 20);
+    const COLORREF CLR_TEXT_MUTED     = RGB(141, 155, 176);  // #8D9BB0 Slate
+    const COLORREF CLR_HEADER_BG      = RGB(26, 33, 45);     // #1A212D Exact Title Bar Match
+    const COLORREF CLR_HEADER_TEXT    = RGB(203, 213, 225);  // #CBD5E1 Cool Header Text
+    const COLORREF CLR_BORDER         = RGB(40, 53, 72);     // #283548 Soft Midnight Border
+    const COLORREF CLR_BTN_BG         = RGB(34, 44, 61);     // #222C3D
+    const COLORREF CLR_BTN_BORDER     = RGB(55, 70, 95);     // #37465F
+    const COLORREF CLR_BTN_PRESSED    = RGB(20, 26, 36);     // #141A24
+    const COLORREF CLR_BTN_DEL_BG     = RGB(215, 55, 35);    // Crimson Coral for Delete
+    const COLORREF CLR_BTN_DEL_PRESS  = RGB(175, 40, 25);
 
     struct DialogContext {
         HWND hWnd = nullptr;
@@ -294,38 +296,141 @@ namespace {
         return CDRF_DODEFAULT;
     }
 
+    LRESULT CALLBACK LeftoversListSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+        switch (uMsg) {
+        case WM_ERASEBKGND: {
+            HDC hdc = (HDC)wParam;
+            RECT rc;
+            GetClientRect(hWnd, &rc);
+            HBRUSH hBr = CreateSolidBrush(CLR_BG_EVEN);
+            FillRect(hdc, &rc, hBr);
+            DeleteObject(hBr);
+            return 1;
+        }
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(hWnd, LeftoversListSubclassProc, uIdSubclass);
+            break;
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    LRESULT CALLBACK LeftoversHeaderSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
+        switch (uMsg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+            RECT rcClient;
+            GetClientRect(hWnd, &rcClient);
+
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP memBM = CreateCompatibleBitmap(hdc, rcClient.right, rcClient.bottom);
+            HBITMAP oldBM = (HBITMAP)SelectObject(memDC, memBM);
+
+            HBRUSH hBrBg = CreateSolidBrush(CLR_HEADER_BG);
+            FillRect(memDC, &rcClient, hBrBg);
+            DeleteObject(hBrBg);
+
+            HPEN hPen = CreatePen(PS_SOLID, 1, CLR_BORDER);
+            HPEN oldPen = (HPEN)SelectObject(memDC, hPen);
+            MoveToEx(memDC, rcClient.left, rcClient.bottom - 1, nullptr);
+            LineTo(memDC, rcClient.right, rcClient.bottom - 1);
+
+            int count = Header_GetItemCount(hWnd);
+            DialogContext* ctx = reinterpret_cast<DialogContext*>(dwRefData);
+            HFONT oldFont = (HFONT)SelectObject(memDC, ctx ? ctx->hFontHeader : GetStockObject(DEFAULT_GUI_FONT));
+            SetBkMode(memDC, TRANSPARENT);
+            SetTextColor(memDC, CLR_HEADER_TEXT);
+
+            for (int i = 0; i < count; ++i) {
+                RECT rcItem;
+                Header_GetItemRect(hWnd, i, &rcItem);
+
+                MoveToEx(memDC, rcItem.right - 1, rcItem.top + 4, nullptr);
+                LineTo(memDC, rcItem.right - 1, rcItem.bottom - 4);
+
+                wchar_t text[128] = { 0 };
+                HDITEMW hdi = { 0 };
+                hdi.mask = HDI_TEXT;
+                hdi.pszText = text;
+                hdi.cchTextMax = 128;
+                Header_GetItem(hWnd, i, &hdi);
+
+                RECT rcText = rcItem;
+                rcText.left += 10;
+                rcText.right -= 10;
+                UINT align = (i == 1) ? DT_RIGHT : DT_LEFT;
+                DrawTextW(memDC, text, -1, &rcText, align | DT_VCENTER | DT_SINGLELINE);
+            }
+
+            SelectObject(memDC, oldFont);
+            SelectObject(memDC, oldPen);
+            DeleteObject(hPen);
+
+            BitBlt(hdc, 0, 0, rcClient.right, rcClient.bottom, memDC, 0, 0, SRCCOPY);
+            SelectObject(memDC, oldBM);
+            DeleteObject(memBM);
+            DeleteDC(memDC);
+
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
+        case WM_ERASEBKGND:
+            return 1;
+        case WM_NCDESTROY:
+            RemoveWindowSubclass(hWnd, LeftoversHeaderSubclassProc, uIdSubclass);
+            break;
+        }
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
     void DrawDarkButton(DialogContext* ctx, DRAWITEMSTRUCT* pDIS) {
         HDC hdc = pDIS->hDC;
         RECT rc = pDIS->rcItem;
         bool isPressed = (pDIS->itemState & ODS_SELECTED) != 0;
         bool isDeleteBtn = (pDIS->CtlID == IDC_BTN_DELETE_SELECTED);
 
-        COLORREF bgCol;
+        // Fill background with dialog color so rounded capsule corners blend cleanly
+        HBRUSH hBrParent = CreateSolidBrush(CLR_BG_EVEN);
+        FillRect(hdc, &rc, hBrParent);
+        DeleteObject(hBrParent);
+
+        // Anti-aliased Capsule Drawing with GDI+
+        Gdiplus::Graphics g(hdc);
+        g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+        float x = (float)rc.left + 1.0f;
+        float y = (float)rc.top + 1.0f;
+        float w = (float)(rc.right - rc.left) - 2.0f;
+        float h = (float)(rc.bottom - rc.top) - 2.0f;
+        float r = h; // pill capsule radius = height
+
+        Gdiplus::GraphicsPath path;
+        path.AddArc(x, y, r, r, 90, 180);
+        path.AddArc(x + w - r, y, r, r, 270, 180);
+        path.CloseFigure();
+
+        Gdiplus::Color fillCol;
+        Gdiplus::Color borderCol;
         if (isDeleteBtn) {
-            bgCol = isPressed ? CLR_BTN_DEL_PRESS : CLR_BTN_DEL_BG;
+            fillCol = isPressed ? Gdiplus::Color(255, 175, 40, 25) : Gdiplus::Color(255, 215, 55, 35);
+            borderCol = Gdiplus::Color(255, 240, 80, 60);
         } else {
-            bgCol = isPressed ? CLR_BTN_PRESSED : CLR_BTN_BG;
+            fillCol = isPressed ? Gdiplus::Color(255, 20, 26, 36) : Gdiplus::Color(255, 34, 44, 61);
+            borderCol = Gdiplus::Color(255, 55, 70, 95);
         }
 
-        HBRUSH hBr = CreateSolidBrush(bgCol);
-        FillRect(hdc, &rc, hBr);
-        DeleteObject(hBr);
+        Gdiplus::SolidBrush br(fillCol);
+        g.FillPath(&br, &path);
 
-        HPEN hPen = CreatePen(PS_SOLID, 1, isDeleteBtn ? CLR_BTN_DEL_BG : CLR_BTN_BORDER);
-        HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
-        HGDIOBJ hOldBrush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
-        Rectangle(hdc, rc.left, rc.top, rc.right, rc.bottom);
-        SelectObject(hdc, hOldPen);
-        SelectObject(hdc, hOldBrush);
-        DeleteObject(hPen);
+        Gdiplus::Pen pen(borderCol, 1.2f);
+        g.DrawPath(&pen, &path);
 
         wchar_t btnText[64] = { 0 };
         GetWindowTextW(pDIS->hwndItem, btnText, 64);
 
         SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, isDeleteBtn ? RGB(255, 255, 255) : CLR_TEXT_NORMAL);
+        SetTextColor(hdc, RGB(255, 255, 255));
         HFONT hOldFont = (HFONT)SelectObject(hdc, isDeleteBtn ? ctx->hFontBold : ctx->hFont);
-
         DrawTextW(hdc, btnText, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SelectObject(hdc, hOldFont);
     }
@@ -344,6 +449,13 @@ namespace {
             BOOL darkMode = TRUE;
             DwmSetWindowAttribute(hWnd, 20, &darkMode, sizeof(darkMode));
             DwmSetWindowAttribute(hWnd, 19, &darkMode, sizeof(darkMode));
+
+            // Set Application Logo Icon in titlebar
+            HICON hBigIcon = LoadIconW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON));
+            HICON hSmallIcon = (HICON)LoadImageW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+                                                 GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            if (hBigIcon) SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hBigIcon);
+            if (hSmallIcon) SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hSmallIcon);
 
             ctx->hBrushBg = CreateSolidBrush(CLR_BG_EVEN);
             UINT dpi = GetDlgDpi(hWnd);
@@ -376,8 +488,17 @@ namespace {
                 0, 0, 0, 0, hWnd, (HMENU)IDC_LEFTOVERS_LIST, GetModuleHandle(nullptr), nullptr);
 
             ListView_SetExtendedListViewStyle(ctx->hListView, LVS_EX_CHECKBOXES | LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER);
+            ListView_SetBkColor(ctx->hListView, CLR_BG_EVEN);
+            ListView_SetTextBkColor(ctx->hListView, CLR_BG_EVEN);
+            ListView_SetTextColor(ctx->hListView, CLR_TEXT_NORMAL);
             SetWindowTheme(ctx->hListView, L"DarkMode_Explorer", nullptr);
+            SetWindowSubclass(ctx->hListView, LeftoversListSubclassProc, 1, (DWORD_PTR)ctx);
+
             ctx->hHeader = ListView_GetHeader(ctx->hListView);
+            if (ctx->hHeader) {
+                SetWindowTheme(ctx->hHeader, L"", L"");
+                SetWindowSubclass(ctx->hHeader, LeftoversHeaderSubclassProc, 1, (DWORD_PTR)ctx);
+            }
 
             // Columns
             LVCOLUMNW col = { 0 };

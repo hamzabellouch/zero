@@ -29,6 +29,7 @@ private slots:
     void onUpdateProcesses();
     void onTableDoubleClicked(int row, int column);
     void onContextMenu(const QPoint &pos);
+    void onHeaderClicked(int logicalIndex);
     void onEndTask();
 
 private:
@@ -51,9 +52,22 @@ private:
     QAction *m_actionDesktop = nullptr;
     QAction *m_actionStore = nullptr;
     QAction *m_actionProcesses = nullptr;
+    QAction *m_actionDark = nullptr;
+    QAction *m_actionLight = nullptr;
+    QAction *m_actionCompact = nullptr;
+    QAction *m_actionNormal = nullptr;
+    QAction *m_actionLarge = nullptr;
+
+    bool m_isDarkMode = true;
+    int m_rowSizeMode = 0; // Default: Compact Cards
+    int m_appSortColumn = 0;
+    bool m_appSortAscending = true;
 
     void setupUi();
     void applyDarkTheme();
+    void applyLightTheme();
+    void setRowSizeMode(int mode);
+    void sortApps();
     void loadApps(bool store = false);
     void loadProcesses();
     void updateTableColumns();

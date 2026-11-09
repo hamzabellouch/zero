@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 struct InstalledApp {
     std::wstring displayName;
@@ -12,6 +13,7 @@ struct InstalledApp {
     std::wstring uninstallString;
     std::wstring quietUninstallString;
     std::wstring installDate;
+    uint64_t installDateSortKey = 0;
     std::wstring displayIcon;
     uint64_t estimatedSizeBytes = 0;
     std::wstring sizeFormatted;
